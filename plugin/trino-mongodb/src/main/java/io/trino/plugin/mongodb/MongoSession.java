@@ -182,6 +182,8 @@ public class MongoSession
     private final Cache<SchemaTableName, MongoTable> tableCache;
     private final String implicitPrefix;
 
+    private final FilterEnforcer filterEnforcer;
+
     public MongoSession(TypeManager typeManager, MongoClient client, MongoClientConfig config)
     {
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
@@ -190,7 +192,7 @@ public class MongoSession
         this.caseInsensitiveNameMatching = config.isCaseInsensitiveNameMatching();
         this.cursorBatchSize = config.getCursorBatchSize();
         this.implicitPrefix = requireNonNull(config.getImplicitRowFieldPrefix(), "config.getImplicitRowFieldPrefix() is null");
-
+        this.filterEnforcer = new FilterEnforcer(config.getRequiredFilters());
         this.tableCache = EvictableCacheBuilder.newBuilder()
                 .expireAfterWrite(1, MINUTES)  // TODO: Configure
                 .build();
@@ -524,6 +526,8 @@ public class MongoSession
         FindIterable<Document> iterable = collection.find(filter).projection(projection).collation(SIMPLE_COLLATION);
         tableHandle.limit().ifPresent(iterable::limit);
         log.debug("Find documents: collection: %s, filter: %s, projection: %s", tableHandle.schemaTableName(), filter, projection);
+
+        this.filterEnforcer.checkAndRaiseIfInvalid(collection.getNamespace().getCollectionName(), filter);
 
         if (cursorBatchSize != 0) {
             iterable.batchSize(cursorBatchSize);
