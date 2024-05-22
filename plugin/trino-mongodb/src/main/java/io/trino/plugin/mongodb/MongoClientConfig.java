@@ -52,6 +52,8 @@ public class MongoClientConfig
     private boolean allowLocalScheduling;
     private Duration dynamicFilteringWaitTimeout = new Duration(5, SECONDS);
 
+    private String requiredFilters;
+
     @NotNull
     public String getSchemaCollection()
     {
@@ -283,6 +285,19 @@ public class MongoClientConfig
     public MongoClientConfig setDynamicFilteringWaitTimeout(Duration dynamicFilteringWaitTimeout)
     {
         this.dynamicFilteringWaitTimeout = dynamicFilteringWaitTimeout;
+        return this;
+    }
+
+    public @Pattern(message = "Invalid 'required-filters'. Expected a comma-separated list of <key>:<value> pairs.", regexp = "^([^:,]+:[^:,]+,?)*$") String getRequiredFilters()
+    {
+        return requiredFilters;
+    }
+
+    @Config("mongodb.required-filters")
+    @ConfigDescription("Comma-separated list of <collection>:<key> pairs indicating a <collection> requires a filter on key <key>.")
+    public MongoClientConfig setRequiredFilters(String requiredFilters)
+    {
+        this.requiredFilters = requiredFilters;
         return this;
     }
 }
