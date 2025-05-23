@@ -3,7 +3,7 @@ name: close-ci
 on:
   push:
     branches:
-      - master
+      - close_fork
   pull_request:
     paths-ignore:
       - 'docs/**'
