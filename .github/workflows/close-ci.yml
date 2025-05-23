@@ -1,0 +1,26 @@
+name: Close CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup build environment
+        uses: ./.github/actions/setup
+        with:
+          cache: 'restore'
+          java-version: 24
+          cleanup-node: true
+      - name: Compile commit
+        uses: ./.github/actions/compile-commit
+        with:
+          base_ref: master
+      - name: Build Docker images
+        run: ./core/docker/build.sh
