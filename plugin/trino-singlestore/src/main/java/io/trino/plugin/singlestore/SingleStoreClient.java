@@ -59,6 +59,7 @@ import io.trino.spi.type.VarcharType;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
@@ -216,11 +217,13 @@ public class SingleStoreClient
     @Override
     public Collection<String> listSchemas(Connection connection)
     {
-        // for SingleStore, we need to list catalogs instead of schemas
-        try (ResultSet resultSet = connection.getMetaData().getCatalogs()) {
+        // Avoid using DatabaseMetaData.getCatalogs method because
+        // https://github.com/memsql/S2-JDBC-Connector/pull/9 causes the driver to return only the databases in the current workspace
+        try (PreparedStatement statement = connection.prepareStatement("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA");
+                ResultSet resultSet = statement.executeQuery()) {
             ImmutableSet.Builder<String> schemaNames = ImmutableSet.builder();
             while (resultSet.next()) {
-                String schemaName = resultSet.getString("TABLE_CAT");
+                String schemaName = resultSet.getString("SCHEMA_NAME");
                 // skip internal schemas
                 if (filterSchema(schemaName)) {
                     schemaNames.add(schemaName);
@@ -361,7 +364,8 @@ public class SingleStoreClient
     private static ColumnMapping checkNullUsingBytes(ColumnMapping mapping)
     {
         if (mapping.getReadFunction() instanceof SliceReadFunction sliceReadFunction) {
-            SliceReadFunction wrapper = new SliceReadFunction() {
+            SliceReadFunction wrapper = new SliceReadFunction()
+            {
                 @Override
                 public Slice readSlice(ResultSet resultSet, int columnIndex)
                         throws SQLException
@@ -705,21 +709,35 @@ public class SingleStoreClient
     {
         requireNonNull(timeType, "timeType is null");
         checkArgument(timeType.getPrecision() <= 9, "Unsupported type precision: %s", timeType);
-        return (resultSet, columnIndex) -> {
-            // SingleStore JDBC driver wraps time to be within LocalTime range, which results in values which differ from what is stored, so we verify them
-            String timeString = resultSet.getString(columnIndex);
-            try {
-                long nanosOfDay = LocalTime.from(ISO_LOCAL_TIME.parse(timeString)).toNanoOfDay();
-                verify(nanosOfDay < NANOSECONDS_PER_DAY, "Invalid value of nanosOfDay: %s", nanosOfDay);
-                long picosOfDay = nanosOfDay * PICOSECONDS_PER_NANOSECOND;
-                long rounded = round(picosOfDay, 12 - timeType.getPrecision());
-                if (rounded == PICOSECONDS_PER_DAY) {
-                    rounded = 0;
-                }
-                return rounded;
+        return new LongReadFunction()
+        {
+            @Override
+            public boolean isNull(ResultSet resultSet, int columnIndex)
+                    throws SQLException
+            {
+                // Singlestore driver 1.2.9 will throw an exception if incorrect time are read using getObject()
+                resultSet.getString(columnIndex);
+                return resultSet.wasNull();
             }
-            catch (DateTimeParseException e) {
-                throw new IllegalStateException(format("Supported Trino TIME type range is between 00:00:00 and 23:59:59.999999 but got %s", timeString), e);
+
+            @Override
+            public long readLong(ResultSet resultSet, int columnIndex)
+                    throws SQLException
+            {
+                String timeString = resultSet.getString(columnIndex);
+                try {
+                    long nanosOfDay = LocalTime.from(ISO_LOCAL_TIME.parse(timeString)).toNanoOfDay();
+                    verify(nanosOfDay < NANOSECONDS_PER_DAY, "Invalid value of nanosOfDay: %s", nanosOfDay);
+                    long picosOfDay = nanosOfDay * PICOSECONDS_PER_NANOSECOND;
+                    long rounded = round(picosOfDay, 12 - timeType.getPrecision());
+                    if (rounded == PICOSECONDS_PER_DAY) {
+                        rounded = 0;
+                    }
+                    return rounded;
+                }
+                catch (DateTimeParseException e) {
+                    throw new IllegalStateException(format("Supported Trino TIME type range is between 00:00:00 and 23:59:59.999999 but got %s", timeString), e);
+                }
             }
         };
     }

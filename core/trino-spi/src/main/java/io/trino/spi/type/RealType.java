@@ -17,7 +17,6 @@ import io.airlift.slice.XxHash64;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
-import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.function.FlatFixed;
 import io.trino.spi.function.FlatFixedOffset;
 import io.trino.spi.function.FlatVariableOffset;
@@ -67,7 +66,7 @@ public final class RealType
     }
 
     @Override
-    public Object getObjectValue(ConnectorSession session, Block block, int position)
+    public Object getObjectValue(Block block, int position)
     {
         if (block.isNull(position)) {
             return null;
@@ -131,10 +130,10 @@ public final class RealType
     @ScalarOperator(READ_VALUE)
     private static void writeFlat(
             long value,
-            byte[] fixedSizeSlice,
-            int fixedSizeOffset,
-            byte[] unusedVariableSizeSlice,
-            int unusedVariableSizeOffset)
+            @FlatFixed byte[] fixedSizeSlice,
+            @FlatFixedOffset int fixedSizeOffset,
+            @FlatVariableWidth byte[] unusedVariableSizeSlice,
+            @FlatVariableOffset int unusedVariableSizeOffset)
     {
         INT_HANDLE.set(fixedSizeSlice, fixedSizeOffset, (int) value);
     }

@@ -13,8 +13,10 @@
  */
 package io.trino.filesystem.gcs;
 
+import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
+import com.google.cloud.storage.Bucket;
 import com.google.cloud.storage.BucketInfo;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.testing.RemoteStorageHelper;
@@ -55,8 +57,9 @@ public abstract class AbstractTestGcsFileSystem
         // create/get/list/delete blob
         // For gcp testing this corresponds to the Cluster Storage Admin and Cluster Storage Object Admin roles
         byte[] jsonKeyBytes = Base64.getDecoder().decode(gcpCredentialKey);
-        GcsFileSystemConfig config = new GcsFileSystemConfig().setJsonKey(new String(jsonKeyBytes, UTF_8));
-        GcsStorageFactory storageFactory = new GcsStorageFactory(config);
+        GcsFileSystemConfig config = new GcsFileSystemConfig();
+        GcsServiceAccountAuthConfig authConfig = new GcsServiceAccountAuthConfig().setJsonKey(new String(jsonKeyBytes, UTF_8));
+        GcsStorageFactory storageFactory = new GcsStorageFactory(config, new GcsServiceAccountAuth(authConfig));
         this.gcsFileSystemFactory = new GcsFileSystemFactory(config, storageFactory);
         this.storage = storageFactory.create(ConnectorIdentity.ofUser("test"));
         String bucket = RemoteStorageHelper.generateBucketName();
@@ -70,7 +73,11 @@ public abstract class AbstractTestGcsFileSystem
     void tearDown()
     {
         try {
-            storage.delete(rootLocation.host().get());
+            Bucket bucket = storage.get(new GcsLocation(rootLocation).bucket());
+            for (Blob blob : bucket.list().iterateAll()) {
+                storage.delete(blob.getBlobId());
+            }
+            bucket.delete();
         }
         finally {
             fileSystem = null;

@@ -38,6 +38,7 @@ final class TestingResourceGroups
                 selectors.stream()
                         .map(SelectorSpecBuilder::build)
                         .collect(toImmutableList()),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -50,10 +51,11 @@ final class TestingResourceGroups
     {
         return new ResourceGroupSpec(
                 new ResourceGroupNameTemplate(segmentName),
-                DataSize.of(100, MEGABYTE).toString(),
+                Optional.of(DataSize.of(100, MEGABYTE).toString()),
                 10,
                 Optional.empty(),
                 Optional.of(10),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -72,6 +74,7 @@ final class TestingResourceGroups
     {
         return new SelectorSpecBuilder(
                 new SelectorSpec(
+                        Optional.empty(),
                         Optional.empty(),
                         Optional.empty(),
                         Optional.empty(),
@@ -108,6 +111,7 @@ final class TestingResourceGroups
                             spec.getOriginalUserRegex(),
                             spec.getAuthenticatedUserRegex(),
                             spec.getSourceRegex(),
+                            spec.getQueryText(),
                             spec.getQueryType(),
                             spec.getClientTags(),
                             spec.getResourceEstimate(),
@@ -123,6 +127,7 @@ final class TestingResourceGroups
                             spec.getOriginalUserRegex(),
                             spec.getAuthenticatedUserRegex(),
                             spec.getSourceRegex(),
+                            spec.getQueryText(),
                             spec.getQueryType(),
                             spec.getClientTags(),
                             spec.getResourceEstimate(),
@@ -138,6 +143,7 @@ final class TestingResourceGroups
                             Optional.of(Pattern.compile(originalUserPattern)),
                             spec.getAuthenticatedUserRegex(),
                             spec.getSourceRegex(),
+                            spec.getQueryText(),
                             spec.getQueryType(),
                             spec.getClientTags(),
                             spec.getResourceEstimate(),
@@ -153,6 +159,23 @@ final class TestingResourceGroups
                             spec.getOriginalUserRegex(),
                             Optional.of(Pattern.compile(authenticatedUserPattern)),
                             spec.getSourceRegex(),
+                            spec.getQueryText(),
+                            spec.getQueryType(),
+                            spec.getClientTags(),
+                            spec.getResourceEstimate(),
+                            spec.getGroup()));
+        }
+
+        public SelectorSpecBuilder queryTextPattern(String queryTextPattern)
+        {
+            return new SelectorSpecBuilder(
+                    new SelectorSpec(
+                            spec.getUserRegex(),
+                            spec.getUserGroupRegex(),
+                            spec.getOriginalUserRegex(),
+                            spec.getAuthenticatedUserRegex(),
+                            spec.getSourceRegex(),
+                            Optional.of(Pattern.compile(queryTextPattern)),
                             spec.getQueryType(),
                             spec.getClientTags(),
                             spec.getResourceEstimate(),

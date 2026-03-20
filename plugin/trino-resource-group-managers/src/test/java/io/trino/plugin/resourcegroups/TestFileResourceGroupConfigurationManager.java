@@ -30,7 +30,9 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 import static com.google.common.io.Resources.getResource;
+import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
+import static io.airlift.units.DataSize.Unit.TERABYTE;
 import static io.trino.plugin.resourcegroups.TestingResourceGroups.groupIdTemplate;
 import static io.trino.plugin.resourcegroups.TestingResourceGroups.managerSpec;
 import static io.trino.plugin.resourcegroups.TestingResourceGroups.resourceGroupSpec;
@@ -43,6 +45,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class TestFileResourceGroupConfigurationManager
 {
     private static final ResourceEstimates EMPTY_RESOURCE_ESTIMATES = new ResourceEstimates(Optional.empty(), Optional.empty(), Optional.empty());
+    private static final long MEMORY_POOL_SIZE = 31415926535900L; // arbitrary uneven value for testing
+    private static final String QUERY = "select 1";
 
     @Test
     public void testInvalid()
@@ -187,6 +191,22 @@ public class TestFileResourceGroupConfigurationManager
     }
 
     @Test
+    public void testMatchByQueryText()
+    {
+        ManagerSpec managerSpec = managerSpec(
+                resourceGroupSpec("group"),
+                ImmutableList.of(selectorSpec(groupIdTemplate("group")).queryTextPattern("(?i).+FROM tableX")));
+
+        FileResourceGroupConfigurationManager manager = new FileResourceGroupConfigurationManager(listener -> {}, managerSpec);
+
+        assertThat(manager.match(queryTextSelectionCriteria("select 1"))).isEmpty();
+        assertThat(manager.match(queryTextSelectionCriteria("select * from tableY"))).isEmpty();
+        assertThat(manager.match(queryTextSelectionCriteria("select * from tableX")))
+                .map(SelectionContext::getContext)
+                .isEqualTo(Optional.of(groupIdTemplate("group")));
+    }
+
+    @Test
     public void testConfiguration()
     {
         FileResourceGroupConfigurationManager manager = parse("resource_groups_config.json");
@@ -197,6 +217,8 @@ public class TestFileResourceGroupConfigurationManager
         assertThat(global.getSoftCpuLimit()).isEqualTo(Duration.ofHours(1));
         assertThat(global.getHardCpuLimit()).isEqualTo(Duration.ofDays(1));
         assertThat(global.getCpuQuotaGenerationMillisPerSecond()).isEqualTo(1000 * 24);
+        assertThat(global.getHardPhysicalDataScanLimitBytes()).isEqualTo(DataSize.of(1, TERABYTE).toBytes());
+        assertThat(global.getPhysicalDataScanQuotaGenerationBytesPerSecond()).isEqualTo(DataSize.of(1, TERABYTE).toBytes() / 3600);
         assertThat(global.getMaxQueuedQueries()).isEqualTo(1000);
         assertThat(global.getHardConcurrencyLimit()).isEqualTo(100);
         assertThat(global.getSchedulingPolicy()).isEqualTo(WEIGHTED);
@@ -212,6 +234,15 @@ public class TestFileResourceGroupConfigurationManager
         assertThat(sub.getSchedulingPolicy()).isNull();
         assertThat(sub.getSchedulingWeight()).isEqualTo(5);
         assertThat(sub.getJmxExport()).isFalse();
+        assertThat(sub.getHardPhysicalDataScanLimitBytes()).isEqualTo(DataSize.of(10, MEGABYTE).toBytes());
+        assertThat(sub.getPhysicalDataScanQuotaGenerationBytesPerSecond()).isEqualTo(DataSize.of(10, MEGABYTE).toBytes() / 3600);
+
+        ResourceGroupId subIdNoSoftMemoryLimit = new ResourceGroupId(globalId, "sub_no_soft_memory_limit");
+        ResourceGroup subNoSoftMemoryLimit = new TestingResourceGroup(subIdNoSoftMemoryLimit);
+        manager.configure(subNoSoftMemoryLimit, new SelectionContext<>(subIdNoSoftMemoryLimit, new ResourceGroupIdTemplate("global.sub_no_soft_memory_limit")));
+        assertThat(subNoSoftMemoryLimit.getSoftMemoryLimitBytes()).isEqualTo(MEMORY_POOL_SIZE);
+        assertThat(subNoSoftMemoryLimit.getHardConcurrencyLimit()).isEqualTo(4);
+        assertThat(subNoSoftMemoryLimit.getSchedulingWeight()).isEqualTo(1);
     }
 
     @Test
@@ -235,9 +266,8 @@ public class TestFileResourceGroupConfigurationManager
     @Test
     public void testDocsExample()
     {
-        long memoryPoolSize = 31415926535900L; // arbitrary uneven value for testing
         FileResourceGroupConfigurationManager manager = new FileResourceGroupConfigurationManager(
-                (listener) -> listener.accept(new MemoryPoolInfo(memoryPoolSize, 0, 0, ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of())),
+                (listener) -> listener.accept(new MemoryPoolInfo(MEMORY_POOL_SIZE, 0, 0, ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of())),
                 new FileResourceGroupConfig()
                         // TODO: figure out a better way to validate documentation
                         .setConfigFile("../../docs/src/main/sphinx/admin/resource-groups-example.json"));
@@ -251,13 +281,32 @@ public class TestFileResourceGroupConfigurationManager
                 Optional.of("jdbc#powerfulbi"),
                 ImmutableSet.of("hipri"),
                 EMPTY_RESOURCE_ESTIMATES,
+                QUERY,
                 Optional.of("select")));
         assertThat(selectionContext.getResourceGroupId().toString()).isEqualTo("global.adhoc.bi-powerfulbi.Alice");
         TestingResourceGroup resourceGroup = new TestingResourceGroup(selectionContext.getResourceGroupId());
         manager.configure(resourceGroup, selectionContext);
         assertThat(resourceGroup.getHardConcurrencyLimit()).isEqualTo(3);
         assertThat(resourceGroup.getMaxQueuedQueries()).isEqualTo(10);
-        assertThat(resourceGroup.getSoftMemoryLimitBytes()).isEqualTo(memoryPoolSize / 10);
+        assertThat(resourceGroup.getSoftMemoryLimitBytes()).isEqualTo(MEMORY_POOL_SIZE / 10);
+
+        selectionContext = match(manager, new SelectionCriteria(
+                true,
+                "Amanda",
+                ImmutableSet.of(),
+                "Amanda",
+                Optional.empty(),
+                Optional.empty(),
+                ImmutableSet.of(),
+                EMPTY_RESOURCE_ESTIMATES,
+                QUERY,
+                Optional.empty()));
+        assertThat(selectionContext.getResourceGroupId().toString()).isEqualTo("global.adhoc.other.Amanda");
+        resourceGroup = new TestingResourceGroup(selectionContext.getResourceGroupId());
+        manager.configure(resourceGroup, selectionContext);
+        assertThat(resourceGroup.getHardConcurrencyLimit()).isEqualTo(1);
+        assertThat(resourceGroup.getMaxQueuedQueries()).isEqualTo(100);
+        assertThat(resourceGroup.getHardPhysicalDataScanLimitBytes()).isEqualTo(DataSize.of(10, GIGABYTE).toBytes());
     }
 
     @Test
@@ -295,7 +344,9 @@ public class TestFileResourceGroupConfigurationManager
     {
         FileResourceGroupConfig config = new FileResourceGroupConfig();
         config.setConfigFile(getResource(fileName).getPath());
-        return new FileResourceGroupConfigurationManager(listener -> {}, config);
+        return new FileResourceGroupConfigurationManager(
+                listener -> listener.accept(new MemoryPoolInfo(MEMORY_POOL_SIZE, 0, 0, ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of(), ImmutableMap.of())),
+                config);
     }
 
     private static ManagerSpec parseManagerSpec(String fileName)
@@ -307,7 +358,7 @@ public class TestFileResourceGroupConfigurationManager
 
     private static SelectionCriteria userAndSourceSelectionCriteria(String user, String source)
     {
-        return new SelectionCriteria(true, user, ImmutableSet.of(), user, Optional.empty(), Optional.of(source), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, Optional.empty());
+        return new SelectionCriteria(true, user, ImmutableSet.of(), user, Optional.empty(), Optional.of(source), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, QUERY, Optional.empty());
     }
 
     private static SelectionCriteria userSelectionCriteria(String user)
@@ -317,17 +368,22 @@ public class TestFileResourceGroupConfigurationManager
 
     private static SelectionCriteria identitySelectionCriteria(String user, String originalUser, Optional<String> authenticatedUser)
     {
-        return new SelectionCriteria(true, user, ImmutableSet.of(), originalUser, authenticatedUser, Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, Optional.empty());
+        return new SelectionCriteria(true, user, ImmutableSet.of(), originalUser, authenticatedUser, Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, QUERY, Optional.empty());
+    }
+
+    private static SelectionCriteria queryTextSelectionCriteria(String queryText)
+    {
+        return new SelectionCriteria(true, "test_user", ImmutableSet.of(), "test_user", Optional.empty(), Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, queryText, Optional.empty());
     }
 
     private static SelectionCriteria queryTypeSelectionCriteria(String queryType)
     {
-        return new SelectionCriteria(true, "test_user", ImmutableSet.of(), "test_user", Optional.empty(), Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, Optional.of(queryType));
+        return new SelectionCriteria(true, "test_user", ImmutableSet.of(), "test_user", Optional.empty(), Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, QUERY, Optional.of(queryType));
     }
 
     private static SelectionCriteria userGroupsSelectionCriteria(String... groups)
     {
-        return new SelectionCriteria(true, "test_user", ImmutableSet.copyOf(groups), "test_user", Optional.empty(), Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, Optional.empty());
+        return new SelectionCriteria(true, "test_user", ImmutableSet.copyOf(groups), "test_user", Optional.empty(), Optional.empty(), ImmutableSet.of(), EMPTY_RESOURCE_ESTIMATES, QUERY, Optional.empty());
     }
 
     private static SelectionCriteria userAndUserGroupsSelectionCriteria(String user, String group, String... groups)
@@ -343,6 +399,7 @@ public class TestFileResourceGroupConfigurationManager
                 Optional.empty(),
                 ImmutableSet.of(),
                 EMPTY_RESOURCE_ESTIMATES,
+                QUERY,
                 Optional.empty());
     }
 }

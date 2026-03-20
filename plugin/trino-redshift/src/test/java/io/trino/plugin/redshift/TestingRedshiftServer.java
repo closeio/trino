@@ -34,12 +34,12 @@ public final class TestingRedshiftServer
     public static final String TEST_DATABASE = "testdb";
     public static final String TEST_SCHEMA = "test_schema";
 
-    public static final String JDBC_URL = "jdbc:redshift://" + JDBC_ENDPOINT + TEST_DATABASE;
+    public static final String JDBC_URL = "jdbc:redshift://" + JDBC_ENDPOINT + TEST_DATABASE + "?connectTimeout=0";
 
     public static void executeInRedshiftWithRetry(String sql)
     {
         Failsafe.with(RetryPolicy.builder()
-                        .handleIf(e -> e.getMessage().matches(".* concurrent transaction .*"))
+                        .handleIf(TestingRedshiftServer::isExceptionRecoverable)
                         .withDelay(Duration.ofSeconds(10))
                         .withMaxRetries(3)
                         .build())
@@ -61,5 +61,14 @@ public final class TestingRedshiftServer
             throws E
     {
         return Jdbi.create(JDBC_URL, JDBC_USER, JDBC_PASSWORD).withHandle(callback);
+    }
+
+    public static boolean isExceptionRecoverable(Throwable exception)
+    {
+        return exception != null && (
+                exception.getMessage().matches(".* concurrent transaction.*")
+                        || exception.getMessage().matches(".*deadlock detected.*")
+                        || exception.getMessage().matches(".*could not open relation with OID.*")
+                        || exception.getMessage().matches(".*The connection attempt failed.*"));
     }
 }

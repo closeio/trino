@@ -53,7 +53,7 @@ import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-public class TestSortedRangeSet
+class TestSortedRangeSet
 {
     @Test
     public void testEmptySet()
@@ -144,8 +144,8 @@ public class TestSortedRangeSet
         assertThat(rangeSet.containsValue(7L)).isFalse();
         assertThat(rangeSet.containsValue(9L)).isTrue();
         assertThat(rangeSet.toString()).isEqualTo("SortedRangeSet[type=bigint, ranges=3, {[0], [2,5], [9,11)}]");
-        assertThat(rangeSet.toString(ToStringSession.INSTANCE, 2)).isEqualTo("SortedRangeSet[type=bigint, ranges=3, {[0], ..., [9,11)}]");
-        assertThat(rangeSet.toString(ToStringSession.INSTANCE, 1)).isEqualTo("SortedRangeSet[type=bigint, ranges=3, {[0], ...}]");
+        assertThat(rangeSet.toString(2)).isEqualTo("SortedRangeSet[type=bigint, ranges=3, {[0], ..., [9,11)}]");
+        assertThat(rangeSet.toString(1)).isEqualTo("SortedRangeSet[type=bigint, ranges=3, {[0], ...}]");
     }
 
     @Test

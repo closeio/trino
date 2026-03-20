@@ -30,12 +30,11 @@ public record IcebergOptimizeHandle(
         Optional<Long> snapshotId,
         String schemaAsJson,
         String partitionSpecAsJson,
-        List<IcebergColumnHandle> tableColumns,
+        List<IcebergColumnHandle> partitionColumns,
         List<TrinoSortField> sortOrder,
         IcebergFileFormat fileFormat,
         Map<String, String> tableStorageProperties,
-        DataSize maxScannedFileSize,
-        boolean retriesEnabled)
+        DataSize maxScannedFileSize)
         implements IcebergProcedureHandle
 {
     public IcebergOptimizeHandle
@@ -43,7 +42,7 @@ public record IcebergOptimizeHandle(
         requireNonNull(snapshotId, "snapshotId is null");
         requireNonNull(schemaAsJson, "schemaAsJson is null");
         requireNonNull(partitionSpecAsJson, "partitionSpecAsJson is null");
-        tableColumns = ImmutableList.copyOf(requireNonNull(tableColumns, "tableColumns is null"));
+        partitionColumns = ImmutableList.copyOf(requireNonNull(partitionColumns, "partitionColumns is null"));
         sortOrder = ImmutableList.copyOf(requireNonNull(sortOrder, "sortOrder is null"));
         requireNonNull(fileFormat, "fileFormat is null");
         tableStorageProperties = ImmutableMap.copyOf(requireNonNull(tableStorageProperties, "tableStorageProperties is null"));

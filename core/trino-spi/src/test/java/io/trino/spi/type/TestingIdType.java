@@ -14,9 +14,8 @@
 package io.trino.spi.type;
 
 import io.trino.spi.block.Block;
-import io.trino.spi.connector.ConnectorSession;
 
-public class TestingIdType
+public final class TestingIdType
         extends AbstractLongType
 {
     public static final TestingIdType ID = new TestingIdType();
@@ -34,7 +33,7 @@ public class TestingIdType
     }
 
     @Override
-    public Object getObjectValue(ConnectorSession session, Block block, int position)
+    public Object getObjectValue(Block block, int position)
     {
         if (block.isNull(position)) {
             return null;

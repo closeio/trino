@@ -497,6 +497,11 @@ public abstract class AstVisitor<R, C>
         return visitExpression(node, context);
     }
 
+    protected R visitRowField(Row.Field node, C context)
+    {
+        return visitNode(node, context);
+    }
+
     protected R visitTableSubquery(TableSubquery node, C context)
     {
         return visitQueryBody(node, context);
@@ -692,6 +697,16 @@ public abstract class AstVisitor<R, C>
         return visitStatement(node, context);
     }
 
+    protected R visitSetDefaultValue(SetDefaultValue node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitDropDefaultValue(DropDefaultValue node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
     protected R visitSetColumnType(SetColumnType node, C context)
     {
         return visitStatement(node, context);
@@ -728,6 +743,11 @@ public abstract class AstVisitor<R, C>
     }
 
     protected R visitRefreshMaterializedView(RefreshMaterializedView node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitRefreshView(RefreshView node, C context)
     {
         return visitStatement(node, context);
     }
@@ -947,7 +967,7 @@ public abstract class AstVisitor<R, C>
         return visitDataType(node, context);
     }
 
-    protected R visitRowField(RowDataType.Field node, C context)
+    protected R visitRowDataTypeField(RowDataType.Field node, C context)
     {
         return visitNode(node, context);
     }
@@ -1230,6 +1250,26 @@ public abstract class AstVisitor<R, C>
     protected R visitFunctionSpecification(FunctionSpecification node, C context)
     {
         return visitNode(node, context);
+    }
+
+    protected R visitCreateBranch(CreateBranch node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitDropBranch(DropBranch node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitFastForwardBranch(FastForwardBranch node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitShowBranches(ShowBranches node, C context)
+    {
+        return visitStatement(node, context);
     }
 
     protected R visitSessionProperty(SessionProperty node, C context)

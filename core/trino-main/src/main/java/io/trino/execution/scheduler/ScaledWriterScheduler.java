@@ -20,12 +20,13 @@ import io.airlift.units.DataSize;
 import io.trino.execution.RemoteTask;
 import io.trino.execution.TaskStatus;
 import io.trino.execution.buffer.OutputBufferStatus;
-import io.trino.metadata.InternalNode;
+import io.trino.node.InternalNode;
 
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -98,7 +99,7 @@ public class ScaledWriterScheduler
         Collection<TaskStatus> writerTasks = writerTasksProvider.get();
         // Do not scale tasks until all existing writer tasks are initialized with maxWriterCount
         if (writerTasks.size() != scheduledNodes.size()
-                || writerTasks.stream().map(TaskStatus::getMaxWriterCount).anyMatch(Optional::isEmpty)) {
+                || writerTasks.stream().map(TaskStatus::getMaxWriterCount).anyMatch(OptionalInt::isEmpty)) {
             return 0;
         }
 
@@ -127,7 +128,7 @@ public class ScaledWriterScheduler
 
         long minWriterInputBytesToScaleUp = writerTasks.stream()
                 .map(TaskStatus::getMaxWriterCount)
-                .map(Optional::get)
+                .mapToInt(OptionalInt::getAsInt)
                 .mapToLong(writerCount -> writerScalingMinDataProcessed * writerCount)
                 .sum();
         return writerInputBytes >= minWriterInputBytesToScaleUp;

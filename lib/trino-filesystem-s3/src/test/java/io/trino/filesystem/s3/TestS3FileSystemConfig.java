@@ -57,7 +57,7 @@ public class TestS3FileSystemConfig
                 .setCannedAcl(ObjectCannedAcl.NONE)
                 .setSseType(S3SseType.NONE)
                 .setRetryMode(LEGACY)
-                .setMaxErrorRetries(10)
+                .setMaxErrorRetries(20)
                 .setSseKmsKeyId(null)
                 .setUseWebIdentityTokenCredentialsProvider(false)
                 .setSseCustomerKey(null)
@@ -67,7 +67,7 @@ public class TestS3FileSystemConfig
                 .setConnectionTtl(null)
                 .setConnectionMaxIdleTime(null)
                 .setSocketConnectTimeout(null)
-                .setSocketReadTimeout(null)
+                .setSocketTimeout(null)
                 .setTcpKeepAlive(false)
                 .setHttpProxy(null)
                 .setHttpProxySecure(false)
@@ -75,7 +75,6 @@ public class TestS3FileSystemConfig
                 .setHttpProxyUsername(null)
                 .setHttpProxyPassword(null)
                 .setHttpProxyPreemptiveBasicProxyAuth(false)
-                .setSupportsExclusiveCreate(true)
                 .setCrossRegionAccessEnabled(false)
                 .setApplicationId("Trino"));
     }
@@ -109,7 +108,7 @@ public class TestS3FileSystemConfig
                 .put("s3.connection-ttl", "1m")
                 .put("s3.connection-max-idle-time", "2m")
                 .put("s3.socket-connect-timeout", "3m")
-                .put("s3.socket-read-timeout", "4m")
+                .put("s3.socket-timeout", "4m")
                 .put("s3.tcp-keep-alive", "true")
                 .put("s3.http-proxy", "localhost:8888")
                 .put("s3.http-proxy.secure", "true")
@@ -117,7 +116,6 @@ public class TestS3FileSystemConfig
                 .put("s3.http-proxy.username", "test")
                 .put("s3.http-proxy.password", "test")
                 .put("s3.http-proxy.preemptive-basic-auth", "true")
-                .put("s3.exclusive-create", "false")
                 .put("s3.application-id", "application id")
                 .put("s3.cross-region-access", "true")
                 .buildOrThrow();
@@ -148,7 +146,7 @@ public class TestS3FileSystemConfig
                 .setConnectionTtl(new Duration(1, MINUTES))
                 .setConnectionMaxIdleTime(new Duration(2, MINUTES))
                 .setSocketConnectTimeout(new Duration(3, MINUTES))
-                .setSocketReadTimeout(new Duration(4, MINUTES))
+                .setSocketTimeout(new Duration(4, MINUTES))
                 .setTcpKeepAlive(true)
                 .setHttpProxy(HostAndPort.fromParts("localhost", 8888))
                 .setHttpProxySecure(true)
@@ -156,7 +154,6 @@ public class TestS3FileSystemConfig
                 .setHttpProxyUsername("test")
                 .setHttpProxyPassword("test")
                 .setHttpProxyPreemptiveBasicProxyAuth(true)
-                .setSupportsExclusiveCreate(false)
                 .setCrossRegionAccessEnabled(true)
                 .setApplicationId("application id");
 

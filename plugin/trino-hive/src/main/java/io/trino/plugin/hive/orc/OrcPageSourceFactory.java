@@ -267,7 +267,7 @@ public class OrcPageSourceFactory
                 return new EmptyPageSource();
             }
             OrcReader reader = optionalOrcReader.get();
-            if (!originalFile && acidInfo.isPresent() && !acidInfo.get().isOrcAcidVersionValidated()) {
+            if (!originalFile && acidInfo.isPresent() && !acidInfo.get().orcAcidVersionValidated()) {
                 validateOrcAcidVersion(path, reader);
             }
 
@@ -275,6 +275,7 @@ public class OrcPageSourceFactory
             List<OrcColumn> fileReadColumns = new ArrayList<>();
             List<Type> fileReadTypes = new ArrayList<>();
             List<OrcReader.ProjectedLayout> fileReadLayouts = new ArrayList<>();
+            TransformConnectorPageSource.Builder transforms = TransformConnectorPageSource.builder();
             boolean originalFilesPresent = acidInfo.isPresent() && hasOriginalFiles(acidInfo.get());
             if (isFullAcid && !originalFilesPresent) {
                 verifyAcidSchema(reader, path);
@@ -295,6 +296,10 @@ public class OrcPageSourceFactory
                 fileReadColumns.add(requireNonNull(acidColumnsByName.get(AcidSchema.ACID_COLUMN_ROW_ID.toLowerCase(ENGLISH))));
                 fileReadTypes.add(BIGINT);
                 fileReadLayouts.add(fullyProjectedLayout());
+
+                // Ensure transformations are applied so output page does not contain artificial ACID related fields
+                // Without this code, transforms.build(pageSource) could short circuit to original page if no real columns are read
+                transforms.forceTransforms();
             }
 
             Map<String, OrcColumn> fileColumnsByName = ImmutableMap.of();
@@ -317,7 +322,6 @@ public class OrcPageSourceFactory
                     .setDomainCompactionThreshold(domainCompactionThreshold);
             Map<HiveColumnHandle, Domain> effectivePredicateDomains = effectivePredicate.getDomains()
                     .orElseThrow(() -> new IllegalArgumentException("Effective predicate is none"));
-            TransformConnectorPageSource.Builder transforms = TransformConnectorPageSource.builder();
             Map<Object, Integer> baseColumnKeyToOrdinal = new HashMap<>();
             for (HiveColumnHandle column : columns) {
                 HiveColumnHandle baseColumn = column.getBaseColumn();
@@ -407,7 +411,7 @@ public class OrcPageSourceFactory
                     .filter(OrcPageSourceFactory::hasOriginalFiles)
                     // TODO reduce number of file footer accesses. Currently this is quadratic to the number of original files.
                     .map(_ -> OriginalFilesUtils.getPrecedingRowCount(
-                            acidInfo.get().getOriginalFiles(),
+                            acidInfo.get().originalFiles(),
                             path,
                             fileSystemFactory,
                             session.getIdentity(),
@@ -552,7 +556,7 @@ public class OrcPageSourceFactory
 
     private static boolean hasOriginalFiles(AcidInfo acidInfo)
     {
-        return !acidInfo.getOriginalFiles().isEmpty();
+        return !acidInfo.originalFiles().isEmpty();
     }
 
     private static void verifyFileHasColumnNames(List<OrcColumn> columns, Location path)

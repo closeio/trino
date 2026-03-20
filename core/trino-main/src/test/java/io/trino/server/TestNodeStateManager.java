@@ -21,14 +21,15 @@ import io.trino.execution.StateMachine.StateChangeListener;
 import io.trino.execution.TaskId;
 import io.trino.execution.TaskInfo;
 import io.trino.execution.TaskState;
-import io.trino.metadata.NodeState;
+import io.trino.node.NodeState;
 import io.trino.operator.TaskStats;
-import org.joda.time.DateTime;
+import io.trino.server.NodeStateManager.CurrentNodeState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -47,10 +48,10 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-import static io.trino.metadata.NodeState.ACTIVE;
-import static io.trino.metadata.NodeState.DRAINED;
-import static io.trino.metadata.NodeState.DRAINING;
-import static io.trino.metadata.NodeState.SHUTTING_DOWN;
+import static io.trino.node.NodeState.ACTIVE;
+import static io.trino.node.NodeState.DRAINED;
+import static io.trino.node.NodeState.DRAINING;
+import static io.trino.node.NodeState.SHUTTING_DOWN;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,7 +60,7 @@ import static org.testcontainers.shaded.org.awaitility.Awaitility.await;
 
 class TestNodeStateManager
 {
-    public static final int GRACE_PERIOD_MILLIS = 200;
+    public static final int GRACE_PERIOD_MILLIS = 1000;
     private FakeScheduledExecutorService executor;
     private NodeStateManager nodeStateManager;
     private TestingTicker ticker;
@@ -93,7 +94,7 @@ class TestNodeStateManager
         ticker.increment(1, SECONDS);
         executor.run();
 
-        await().atMost(1, SECONDS).untilAsserted(() -> assertThat(nodeStateManager.getServerState()).isEqualTo(DRAINED));
+        await().atMost(5, SECONDS).untilAsserted(() -> assertThat(nodeStateManager.getServerState()).isEqualTo(DRAINED));
     }
 
     @Test
@@ -104,8 +105,8 @@ class TestNodeStateManager
         nodeStateManager.transitionState(NodeState.SHUTTING_DOWN);
         assertThat(nodeStateManager.getServerState()).isEqualTo(NodeState.SHUTTING_DOWN);
 
-        // here wait for at least 2 grace periods, and add some slack to reduce test flakyness
-        await().atMost(4 * GRACE_PERIOD_MILLIS + 100, MILLISECONDS).until(() -> shutdownAction.isShuttingDown());
+        // here wait for at least 4 grace periods, and add some slack to reduce test flakiness
+        await().atMost(4 * GRACE_PERIOD_MILLIS + 1000, MILLISECONDS).until(() -> shutdownAction.isShuttingDown());
     }
 
     @Test
@@ -116,7 +117,7 @@ class TestNodeStateManager
         nodeStateManager.transitionState(NodeState.SHUTTING_DOWN);
         assertThat(nodeStateManager.getServerState()).isEqualTo(NodeState.SHUTTING_DOWN);
 
-        // here wait for at least 2 grace periods, and add some slack to reduce test flakyness
+        // here wait for at least 4 grace periods, and add some slack to reduce test flakiness
         await().atMost(4 * GRACE_PERIOD_MILLIS, MILLISECONDS).until(() -> shutdownAction.isShuttingDown());
 
         assertThatThrownBy(() -> nodeStateManager.transitionState(ACTIVE))
@@ -136,16 +137,15 @@ class TestNodeStateManager
         ticker.increment(1, SECONDS);
         executor.run();
         // 2 gracePeriods or more
-        await().atMost(2 * GRACE_PERIOD_MILLIS + 100, SECONDS)
+        await().atMost(2 * GRACE_PERIOD_MILLIS + 100, MILLISECONDS)
                 .untilAsserted(() -> assertThat(nodeStateManager.getServerState()).isEqualTo(DRAINED));
 
         // now test the shutdown from the DRAINED state
         nodeStateManager.transitionState(NodeState.SHUTTING_DOWN);
         assertThat(nodeStateManager.getServerState()).isEqualTo(NodeState.SHUTTING_DOWN);
 
-        // here only wait for minimal amount of time, as shutdown should be immediate
         await().pollInterval(1, MILLISECONDS)
-                .atMost(100, MILLISECONDS).until(() -> shutdownAction.isShuttingDown());
+                .atMost(1, SECONDS).until(() -> shutdownAction.isShuttingDown());
     }
 
     @Test
@@ -159,7 +159,7 @@ class TestNodeStateManager
                 "1",
                 false,
                 Optional.empty(),
-                new TaskStats(DateTime.now(), null));
+                new TaskStats(Instant.now(), null));
         taskInfos.add(task);
         tasks.set(taskInfos);
 
@@ -170,7 +170,7 @@ class TestNodeStateManager
         // make sure that nodeStateManager registered a listener for tasks to finish
         ticker.increment(1, SECONDS);
         executor.run();
-        await().atMost(1, SECONDS).until(() -> sqlTasksObservable.getTasks().size() == 1);
+        await().atMost(5, SECONDS).until(() -> sqlTasksObservable.getTasks().size() == 1);
 
         // simulate task completion after some time
         tasks.set(Collections.emptyList());
@@ -193,7 +193,7 @@ class TestNodeStateManager
                 "1",
                 false,
                 Optional.empty(),
-                new TaskStats(DateTime.now(), null));
+                new TaskStats(Instant.now(), null));
         taskInfos.add(task);
         tasks.set(taskInfos);
 
@@ -212,7 +212,7 @@ class TestNodeStateManager
                 .stateChanged(TaskState.FINISHED);
 
         // when NodeStateManager sees task finished - it will drain after another drain period
-        await().atMost(1, SECONDS)
+        await().atMost(5, SECONDS)
                 .untilAsserted(() -> assertThat(nodeStateManager.getServerState()).isEqualTo(DRAINED));
     }
 
@@ -238,7 +238,7 @@ class TestNodeStateManager
                 "1",
                 false,
                 Optional.empty(),
-                new TaskStats(DateTime.now(), null));
+                new TaskStats(Instant.now(), null));
         taskInfos.add(task);
         tasks.set(taskInfos);
 
@@ -280,11 +280,12 @@ class TestNodeStateManager
 
         Supplier<List<TaskInfo>> taskInfoSupplier = () -> tasks.get();
         return new NodeStateManager(
+                new CurrentNodeState(),
                 sqlTasksObservable,
                 taskInfoSupplier,
                 serverConfig,
                 shutdownAction,
-                new LifeCycleManager(Collections.emptyList(), null),
+                new LifeCycleManager("node-state-manager", Collections.emptyList(), null),
                 executor);
     }
 
@@ -368,7 +369,7 @@ class TestNodeStateManager
             long now = clock.read();
             List<Job> ready = jobs.stream()
                     .filter(job -> job.time <= now)
-                    .sorted(Comparator.comparing(Job::time))
+                    .sorted(Comparator.comparingLong(Job::time))
                     .toList();
             jobs.removeAll(ready);
 

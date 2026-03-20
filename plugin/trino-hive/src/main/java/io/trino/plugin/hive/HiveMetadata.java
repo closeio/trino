@@ -61,6 +61,7 @@ import io.trino.plugin.hive.acid.AcidTransaction;
 import io.trino.plugin.hive.fs.DirectoryLister;
 import io.trino.plugin.hive.metastore.SemiTransactionalHiveMetastore;
 import io.trino.plugin.hive.procedure.OptimizeTableProcedure;
+import io.trino.plugin.hive.projection.PartitionProjection;
 import io.trino.plugin.hive.security.AccessControlMetadata;
 import io.trino.plugin.hive.statistics.HiveStatisticsProvider;
 import io.trino.plugin.hive.util.HiveUtil;
@@ -116,6 +117,7 @@ import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.function.LanguageFunction;
 import io.trino.spi.function.SchemaFunctionName;
+import io.trino.spi.metrics.Metrics;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.NullableValue;
 import io.trino.spi.predicate.TupleDomain;
@@ -179,6 +181,7 @@ import static io.trino.metastore.Partitions.toPartitionValues;
 import static io.trino.metastore.PrincipalPrivileges.NO_PRIVILEGES;
 import static io.trino.metastore.PrincipalPrivileges.fromHivePrivilegeInfos;
 import static io.trino.metastore.StatisticsUpdateMode.MERGE_INCREMENTAL;
+import static io.trino.metastore.StatisticsUpdateMode.OVERWRITE_ALL;
 import static io.trino.metastore.StorageFormat.VIEW_STORAGE_FORMAT;
 import static io.trino.metastore.type.Category.PRIMITIVE;
 import static io.trino.parquet.writer.ParquetWriter.SUPPORTED_BLOOM_FILTER_TYPES;
@@ -292,6 +295,7 @@ import static io.trino.plugin.hive.metastore.SemiTransactionalHiveMetastore.Part
 import static io.trino.plugin.hive.metastore.SemiTransactionalHiveMetastore.cleanExtraOutputFiles;
 import static io.trino.plugin.hive.metastore.thrift.ThriftMetastoreUtil.getSupportedColumnStatistics;
 import static io.trino.plugin.hive.projection.PartitionProjectionProperties.arePartitionProjectionPropertiesSet;
+import static io.trino.plugin.hive.projection.PartitionProjectionProperties.getPartitionProjectionFromTable;
 import static io.trino.plugin.hive.projection.PartitionProjectionProperties.getPartitionProjectionHiveTableProperties;
 import static io.trino.plugin.hive.projection.PartitionProjectionProperties.getPartitionProjectionTrinoTableProperties;
 import static io.trino.plugin.hive.util.AcidTables.deltaSubdir;
@@ -826,6 +830,13 @@ public class HiveMetadata
                 partitionIds,
                 !hiveTableHandle.getPartitionColumns().isEmpty(),
                 tableDefaultFileFormat));
+    }
+
+    @Override
+    public Metrics getMetrics(ConnectorSession session)
+    {
+        // HiveMetadata and metastore are created per session
+        return metastore.getMetrics();
     }
 
     @Override
@@ -2164,6 +2175,12 @@ public class HiveMetadata
                 throw new TrinoException(NOT_SUPPORTED, format("%s Hive table with value of %s property greater than 1 is not supported", description, SKIP_HEADER_COUNT_KEY));
             }
         });
+
+        if (partitionProjectionEnabled) {
+            Optional<PartitionProjection> partitionProjection = getPartitionProjectionFromTable(table, typeManager);
+            partitionProjection.ifPresent(PartitionProjection::checkWriteSupported);
+        }
+
         if (table.getParameters().containsKey(SKIP_FOOTER_COUNT_KEY)) {
             throw new TrinoException(NOT_SUPPORTED, format("%s Hive table with %s property not supported", description, SKIP_FOOTER_COUNT_KEY));
         }
@@ -2344,7 +2361,8 @@ public class HiveMetadata
                                 partitionValues,
                                 partitionUpdate.getWritePath(),
                                 partitionUpdate.getFileNames(),
-                                partitionStatistics));
+                                partitionStatistics,
+                                MERGE_INCREMENTAL));
             }
             else if (partitionUpdate.getUpdateMode() == NEW || partitionUpdate.getUpdateMode() == OVERWRITE) {
                 // insert into new partition or overwrite existing partition
@@ -2369,6 +2387,13 @@ public class HiveMetadata
                             TrinoFileSystem fileSystem = fileSystemFactory.create(session);
                             cleanExtraOutputFiles(fileSystem, session.getQueryId(), partitionUpdate.getTargetPath(), ImmutableSet.copyOf(partitionUpdate.getFileNames()));
                         }
+                        partitionUpdateInfosBuilder.add(
+                                new PartitionUpdateInfo(
+                                        partitionValues,
+                                        partitionUpdate.getWritePath(),
+                                        partitionUpdate.getFileNames(),
+                                        partitionStatistics,
+                                        OVERWRITE_ALL));
                     }
                     else {
                         metastore.dropPartition(session, handle.getSchemaName(), handle.getTableName(), partition.getValues(), true);
@@ -2674,7 +2699,8 @@ public class HiveMetadata
                                 partitionValues,
                                 partitionUpdate.getWritePath(),
                                 partitionUpdate.getFileNames(),
-                                PartitionStatistics.empty()));
+                                PartitionStatistics.empty(),
+                                MERGE_INCREMENTAL));
             }
         }
 
@@ -3546,8 +3572,11 @@ public class HiveMetadata
     }
 
     @Override
-    public TableStatisticsMetadata getStatisticsCollectionMetadataForWrite(ConnectorSession session, ConnectorTableMetadata tableMetadata)
+    public TableStatisticsMetadata getStatisticsCollectionMetadataForWrite(ConnectorSession session, ConnectorTableMetadata tableMetadata, boolean tableReplace)
     {
+        if (tableReplace) {
+            throw new TrinoException(NOT_SUPPORTED, "This connector does not support replacing tables");
+        }
         if (!isCollectColumnStatisticsOnWrite(session)) {
             return TableStatisticsMetadata.empty();
         }
@@ -3931,7 +3960,7 @@ public class HiveMetadata
         }
         // we need to chop off any "$partitions" and similar suffixes from table name while querying the metastore for the Table object
         TableNameSplitResult tableNameSplit = splitTableName(tableName.getTableName());
-        Optional<Table> table = metastore.getTable(tableName.getSchemaName(), tableNameSplit.getBaseTableName());
+        Optional<Table> table = metastore.getTable(tableName.getSchemaName(), tableNameSplit.baseTableName());
         if (table.isEmpty() || isSomeKindOfAView(table.get())) {
             return Optional.empty();
         }
@@ -3946,7 +3975,7 @@ public class HiveMetadata
                 name.getCatalogName(),
                 new SchemaTableName(
                         name.getSchemaTableName().getSchemaName(),
-                        name.getSchemaTableName().getTableName() + tableNameSplit.getSuffix().orElse(""))));
+                        name.getSchemaTableName().getTableName() + tableNameSplit.suffix().orElse(""))));
     }
 
     private static Optional<CatalogSchemaTableName> redirectTableToIceberg(Optional<String> targetCatalogName, Table table)
@@ -4020,25 +4049,12 @@ public class HiveMetadata
                 new TableNameSplitResult(tableName.substring(0, metadataMarkerIndex), Optional.of(tableName.substring(metadataMarkerIndex)));
     }
 
-    private static class TableNameSplitResult
+    private record TableNameSplitResult(String baseTableName, Optional<String> suffix)
     {
-        private final String baseTableName;
-        private final Optional<String> suffix;
-
-        public TableNameSplitResult(String baseTableName, Optional<String> suffix)
+        private TableNameSplitResult
         {
-            this.baseTableName = requireNonNull(baseTableName, "baseTableName is null");
-            this.suffix = requireNonNull(suffix, "suffix is null");
-        }
-
-        public String getBaseTableName()
-        {
-            return baseTableName;
-        }
-
-        public Optional<String> getSuffix()
-        {
-            return suffix;
+            requireNonNull(baseTableName, "baseTableName is null");
+            requireNonNull(suffix, "suffix is null");
         }
     }
 

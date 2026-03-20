@@ -449,6 +449,10 @@ public class GlueHiveMetastore
             // Database might have been deleted concurrently.
             return ImmutableList.of();
         }
+        catch (AccessDeniedException _) {
+            // permission denied may actually mean "does not exist"
+            return ImmutableList.of();
+        }
         catch (SdkException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
         }
@@ -1106,6 +1110,7 @@ public class GlueHiveMetastore
 
         // statistics are created after partitions because it is not clear if ordering matters in Glue
         var createStatisticsTasks = partitionsWithStatistics.stream()
+                .filter(partitionWithStatistics -> partitionWithStatistics.getStatistics() != PartitionStatistics.empty())
                 .map(partitionWithStatistics -> createUpdatePartitionStatisticsTasks(
                         StatisticsUpdateMode.OVERWRITE_ALL,
                         partitionWithStatistics.getPartition(),

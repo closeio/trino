@@ -30,8 +30,12 @@ import jakarta.ws.rs.core.Response;
 
 import javax.crypto.SecretKey;
 
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static io.airlift.http.client.Request.Builder.fromRequest;
 import static io.jsonwebtoken.security.Keys.hmacShaKeyFor;
@@ -39,25 +43,32 @@ import static io.trino.server.ServletSecurityUtils.setAuthenticatedIdentity;
 import static io.trino.server.security.jwt.JwtUtil.newJwtBuilder;
 import static io.trino.server.security.jwt.JwtUtil.newJwtParserBuilder;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN_TYPE;
+import static jakarta.ws.rs.core.Response.Status.SERVICE_UNAVAILABLE;
 import static jakarta.ws.rs.core.Response.Status.UNAUTHORIZED;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.time.temporal.ChronoUnit.MINUTES;
 import static java.util.Objects.requireNonNull;
 
 public class InternalAuthenticationManager
         implements HttpRequestFilter
 {
     private static final Logger log = Logger.get(InternalAuthenticationManager.class);
+    private static final Supplier<Instant> DEFAULT_EXPIRATION_SUPPLIER = () -> ZonedDateTime.now().plusMinutes(6).toInstant();
+    // Leave a 5 minute buffer to allow for clock skew and GC pauses
+    private static final Function<Instant, Instant> TOKEN_REUSE_THRESHOLD = instant -> instant.minus(5, MINUTES);
 
     private static final String TRINO_INTERNAL_BEARER = "X-Trino-Internal-Bearer";
 
     private final SecretKey hmac;
     private final String nodeId;
     private final JwtParser jwtParser;
+    private final AtomicReference<InternalToken> currentToken;
+    private final StartupStatus startupStatus;
 
     @Inject
-    public InternalAuthenticationManager(InternalCommunicationConfig internalCommunicationConfig, SecurityConfig securityConfig, NodeInfo nodeInfo)
+    public InternalAuthenticationManager(InternalCommunicationConfig internalCommunicationConfig, SecurityConfig securityConfig, NodeInfo nodeInfo, StartupStatus startupStatus)
     {
-        this(getSharedSecret(internalCommunicationConfig, nodeInfo, !securityConfig.getAuthenticationTypes().equals(ImmutableList.of("insecure"))), nodeInfo.getNodeId());
+        this(getSharedSecret(internalCommunicationConfig, nodeInfo, !securityConfig.getAuthenticationTypes().equals(ImmutableList.of("insecure"))), nodeInfo.getNodeId(), startupStatus);
     }
 
     private static String getSharedSecret(InternalCommunicationConfig internalCommunicationConfig, NodeInfo nodeInfo, boolean authenticationEnabled)
@@ -77,13 +88,15 @@ public class InternalAuthenticationManager
         return internalCommunicationConfig.getSharedSecret().orElseGet(nodeInfo::getEnvironment);
     }
 
-    public InternalAuthenticationManager(String sharedSecret, String nodeId)
+    public InternalAuthenticationManager(String sharedSecret, String nodeId, StartupStatus startupStatus)
     {
         requireNonNull(sharedSecret, "sharedSecret is null");
         requireNonNull(nodeId, "nodeId is null");
+        this.startupStatus = requireNonNull(startupStatus, "startupStatus is null");
         this.hmac = hmacShaKeyFor(Hashing.sha256().hashString(sharedSecret, UTF_8).asBytes());
         this.nodeId = nodeId;
         this.jwtParser = newJwtParserBuilder().verifyWith(hmac).build();
+        this.currentToken = new AtomicReference<>(createJwt());
     }
 
     public static boolean isInternalRequest(ContainerRequestContext request)
@@ -108,6 +121,13 @@ public class InternalAuthenticationManager
             throw new RuntimeException("Authentication error", e);
         }
 
+        if (!startupStatus.isStartupComplete()) {
+            request.abortWith(Response.status(SERVICE_UNAVAILABLE)
+                    .type(TEXT_PLAIN_TYPE.toString())
+                    .entity("Trino server is still initializing")
+                    .build());
+        }
+
         Identity identity = Identity.forUser("<internal>")
                 .withPrincipal(new InternalPrincipal(subject))
                 .build();
@@ -118,17 +138,34 @@ public class InternalAuthenticationManager
     public Request filterRequest(Request request)
     {
         return fromRequest(request)
-                .addHeader(TRINO_INTERNAL_BEARER, generateJwt())
+                .addHeader(TRINO_INTERNAL_BEARER, getOrGenerateJwt())
                 .build();
     }
 
-    private String generateJwt()
+    private String getOrGenerateJwt()
     {
-        return newJwtBuilder()
+        InternalToken token = currentToken.get();
+        if (token.isExpired()) {
+            InternalToken newToken = createJwt();
+            if (currentToken.compareAndSet(token, newToken)) {
+                token = newToken;
+            }
+            else {
+                // Another thread already generated a new token
+                token = currentToken.get();
+            }
+        }
+        return token.token();
+    }
+
+    private InternalToken createJwt()
+    {
+        Instant expiration = DEFAULT_EXPIRATION_SUPPLIER.get();
+        return new InternalToken(expiration, newJwtBuilder()
                 .signWith(hmac)
                 .subject(nodeId)
-                .expiration(Date.from(ZonedDateTime.now().plusMinutes(5).toInstant()))
-                .compact();
+                .expiration(Date.from(expiration))
+                .compact());
     }
 
     private String parseJwt(String jwt)
@@ -137,5 +174,19 @@ public class InternalAuthenticationManager
                 .parseSignedClaims(jwt)
                 .getPayload()
                 .getSubject();
+    }
+
+    private record InternalToken(Instant expiration, String token)
+    {
+        public InternalToken
+        {
+            expiration = TOKEN_REUSE_THRESHOLD.apply(requireNonNull(expiration, "expiration is null"));
+            requireNonNull(token, "token is null");
+        }
+
+        public boolean isExpired()
+        {
+            return Instant.now().isAfter(expiration);
+        }
     }
 }

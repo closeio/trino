@@ -4,18 +4,24 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>476-SNAPSHOT</version>
+        <version>479</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>trino-tpch</artifactId>
     <packaging>trino-plugin</packaging>
+    <name>${project.artifactId}</name>
     <description>Trino - TPC-H connector</description>
 
     <dependencies>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.errorprone</groupId>
+            <artifactId>error_prone_annotations</artifactId>
         </dependency>
 
         <dependency>
@@ -26,6 +32,7 @@
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
+            <classifier>classes</classifier>
         </dependency>
 
         <dependency>

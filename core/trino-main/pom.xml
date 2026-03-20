@@ -5,11 +5,12 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>476-SNAPSHOT</version>
+        <version>479</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>trino-main</artifactId>
+    <name>${project.artifactId}</name>
     <description>Trino - Engine</description>
 
     <properties>
@@ -61,6 +62,7 @@
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
+            <classifier>classes</classifier>
         </dependency>
 
         <dependency>
@@ -71,7 +73,6 @@
         <dependency>
             <groupId>com.nimbusds</groupId>
             <artifactId>oauth2-oidc-sdk</artifactId>
-            <classifier>jdk11</classifier>
         </dependency>
 
         <dependency>
@@ -349,7 +350,7 @@
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-analysis-common</artifactId>
-            <version>10.2.1</version>
+            <version>10.3.2</version>
         </dependency>
 
         <dependency>
@@ -401,7 +402,7 @@
 
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
+            <artifactId>okhttp-jvm</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -456,20 +457,6 @@
         <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-parser</artifactId>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>io.trino</groupId>
-            <artifactId>trino-plugin-toolkit</artifactId>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>io.trino</groupId>
-            <artifactId>trino-spi</artifactId>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
@@ -545,14 +532,55 @@
 
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
+            <artifactId>testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
+            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <resources>
+            <resource>
+                <filtering>true</filtering>
+                <directory>src/main/resources</directory>
+                <includes>
+                    <include>io/trino/main/build.properties</include>
+                </includes>
+            </resource>
+            <resource>
+                <filtering>false</filtering>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <exclude>io/trino/main/build.properties</exclude>
+                </excludes>
+            </resource>
+        </resources>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <!-- Ensure incubator Vector API is on the module path for javac -->
+                        <compilerArgs combine.self="merge">
+                            <arg>${extraJavaVectorArgs}</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-javadoc-plugin</artifactId>
+                    <configuration>
+                        <!-- Ensure javadoc resolves incubator Vector API -->
+                        <additionalOptions combine.self="merge">${extraJavaVectorArgs}</additionalOptions>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 </project>

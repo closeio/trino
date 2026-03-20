@@ -71,14 +71,14 @@ public class TestIcebergSnowflakeCatalogConnectorSmokeTest
             executeOnSnowflake(
                     """
                     CREATE OR REPLACE ICEBERG TABLE %s (
-                    	NATIONKEY NUMBER(38,0),
-                    	NAME STRING,
-                    	REGIONKEY NUMBER(38,0),
-                    	COMMENT STRING
+                        NATIONKEY NUMBER(38,0),
+                        NAME STRING,
+                        REGIONKEY NUMBER(38,0),
+                        COMMENT STRING
                     )
-                     EXTERNAL_VOLUME = '%s'
-                     CATALOG = 'SNOWFLAKE'
-                     BASE_LOCATION = '%s/'""".formatted(TpchTable.NATION.getTableName(), SNOWFLAKE_S3_EXTERNAL_VOLUME, TpchTable.NATION.getTableName()));
+                    EXTERNAL_VOLUME = '%s'
+                    CATALOG = 'SNOWFLAKE'
+                    BASE_LOCATION = '%s/'""".formatted(TpchTable.NATION.getTableName(), SNOWFLAKE_S3_EXTERNAL_VOLUME, TpchTable.NATION.getTableName()));
 
             executeOnSnowflake("INSERT INTO %s(NATIONKEY, NAME, REGIONKEY, COMMENT) SELECT N_NATIONKEY, N_NAME, N_REGIONKEY, N_COMMENT FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.%s"
                     .formatted(TpchTable.NATION.getTableName(), TpchTable.NATION.getTableName()));
@@ -87,13 +87,13 @@ public class TestIcebergSnowflakeCatalogConnectorSmokeTest
             executeOnSnowflake(
                     """
                     CREATE OR REPLACE ICEBERG TABLE %s (
-                    	REGIONKEY NUMBER(38,0),
-                    	NAME STRING,
-                    	COMMENT STRING
+                        REGIONKEY NUMBER(38,0),
+                        NAME STRING,
+                        COMMENT STRING
                     )
-                     EXTERNAL_VOLUME = '%s'
-                     CATALOG = 'SNOWFLAKE'
-                     BASE_LOCATION = '%s/'""".formatted(TpchTable.REGION.getTableName(), SNOWFLAKE_S3_EXTERNAL_VOLUME, TpchTable.REGION.getTableName()));
+                    EXTERNAL_VOLUME = '%s'
+                    CATALOG = 'SNOWFLAKE'
+                    BASE_LOCATION = '%s/'""".formatted(TpchTable.REGION.getTableName(), SNOWFLAKE_S3_EXTERNAL_VOLUME, TpchTable.REGION.getTableName()));
 
             executeOnSnowflake("INSERT INTO %s(REGIONKEY, NAME, COMMENT) SELECT R_REGIONKEY, R_NAME, R_COMMENT FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.%s"
                     .formatted(TpchTable.REGION.getTableName(), TpchTable.REGION.getTableName()));
@@ -523,6 +523,14 @@ public class TestIcebergSnowflakeCatalogConnectorSmokeTest
     }
 
     @Test
+    @Override
+    public void testAnalyze()
+    {
+        assertThatThrownBy(super::testAnalyze)
+                .hasMessageMatching("Snowflake managed Iceberg tables do not support modifications");
+    }
+
+    @Test
     public void testNation()
     {
         assertQuery("SELECT count(*) FROM " + TpchTable.NATION.getTableName(), "VALUES 25");
@@ -729,7 +737,7 @@ public class TestIcebergSnowflakeCatalogConnectorSmokeTest
     }
 
     @Override
-    protected void dropTableFromMetastore(String tableName)
+    protected void dropTableFromCatalog(String tableName)
     {
         // used for register table, which is not supported for Iceberg Snowflake catalogs
         throw new UnsupportedOperationException("dropTableFromMetastore is not supported for Iceberg snowflake catalog");

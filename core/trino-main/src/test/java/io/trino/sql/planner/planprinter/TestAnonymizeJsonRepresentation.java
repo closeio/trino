@@ -16,6 +16,7 @@ package io.trino.sql.planner.planprinter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.json.JsonCodec;
+import io.trino.connector.TestingColumnHandle;
 import io.trino.cost.StatsAndCosts;
 import io.trino.execution.TableInfo;
 import io.trino.metadata.QualifiedObjectName;
@@ -24,7 +25,6 @@ import io.trino.plugin.tpch.TpchPlugin;
 import io.trino.plugin.tpch.TpchTableHandle;
 import io.trino.plugin.tpch.TpchTransactionHandle;
 import io.trino.spi.connector.ColumnHandle;
-import io.trino.spi.connector.TestingColumnHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
@@ -115,8 +115,7 @@ public class TestAnonymizeJsonRepresentation
                         "Aggregate",
                         ImmutableMap.of(
                                 "type", "FINAL",
-                                "keys", "[symbol_1, symbol_2]",
-                                "hash", "[]"),
+                                "keys", "[symbol_1, symbol_2]"),
                         ImmutableList.of(
                                 new Symbol(BIGINT, "symbol_1"),
                                 new Symbol(BIGINT, "symbol_2"),
@@ -143,15 +142,12 @@ public class TestAnonymizeJsonRepresentation
                         ImmutableList.of(pb.symbol("b", BIGINT)),
                         ImmutableList.of(),
                         Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty(),
                         ImmutableMap.of(new DynamicFilterId("DF"), pb.symbol("d", BIGINT))),
                 new JsonRenderedNode(
                         "2",
                         "InnerJoin",
                         ImmutableMap.of(
-                                "criteria", "(\"symbol_1\" = \"symbol_2\")",
-                                "hash", "[]"),
+                                "criteria", "(\"symbol_1\" = \"symbol_2\")"),
                         ImmutableList.of(new Symbol(BIGINT, "symbol_3")),
                         ImmutableList.of("dynamicFilterAssignments = {symbol_2 -> #DF}"),
                         ImmutableList.of(),

@@ -51,6 +51,7 @@ import static io.trino.client.uri.ConnectionProperties.CATALOG;
 import static io.trino.client.uri.ConnectionProperties.CLIENT_INFO;
 import static io.trino.client.uri.ConnectionProperties.CLIENT_TAGS;
 import static io.trino.client.uri.ConnectionProperties.DISABLE_COMPRESSION;
+import static io.trino.client.uri.ConnectionProperties.DISALLOW_LOCAL_REDIRECT;
 import static io.trino.client.uri.ConnectionProperties.DNS_RESOLVER;
 import static io.trino.client.uri.ConnectionProperties.DNS_RESOLVER_CONTEXT;
 import static io.trino.client.uri.ConnectionProperties.ENCODING;
@@ -60,6 +61,7 @@ import static io.trino.client.uri.ConnectionProperties.EXTERNAL_AUTHENTICATION_R
 import static io.trino.client.uri.ConnectionProperties.EXTERNAL_AUTHENTICATION_TIMEOUT;
 import static io.trino.client.uri.ConnectionProperties.EXTERNAL_AUTHENTICATION_TOKEN_CACHE;
 import static io.trino.client.uri.ConnectionProperties.EXTRA_CREDENTIALS;
+import static io.trino.client.uri.ConnectionProperties.EXTRA_HEADERS;
 import static io.trino.client.uri.ConnectionProperties.HOSTNAME_IN_CERTIFICATE;
 import static io.trino.client.uri.ConnectionProperties.HTTP_LOGGING_LEVEL;
 import static io.trino.client.uri.ConnectionProperties.HTTP_PROXY;
@@ -243,6 +245,11 @@ public class TrinoUri
         return resolveWithDefault(SESSION_PROPERTIES, ImmutableMap.of());
     }
 
+    public Map<String, String> getExtraHeaders()
+    {
+        return resolveWithDefault(EXTRA_HEADERS, ImmutableMap.of());
+    }
+
     public Optional<String> getSource()
     {
         return resolveOptional(SOURCE);
@@ -423,6 +430,11 @@ public class TrinoUri
         return resolveWithDefault(DISABLE_COMPRESSION, false);
     }
 
+    public boolean isLocalRedirectDisallowed()
+    {
+        return resolveWithDefault(DISALLOW_LOCAL_REDIRECT, false);
+    }
+
     public Optional<String> getEncoding()
     {
         Optional<String> encodings = resolveOptional(ENCODING);
@@ -515,6 +527,7 @@ public class TrinoUri
                 .timeZone(getTimeZone())
                 .locale(getLocale())
                 .properties(getSessionProperties())
+                .extraHeaders(getExtraHeaders())
                 .credentials(getExtraCredentials())
                 .transactionId(null)
                 .resourceEstimates(getResourceEstimates())
@@ -1003,6 +1016,11 @@ public class TrinoUri
             return setProperty(SESSION_PROPERTIES, requireNonNull(sessionProperties, "sessionProperties is null"));
         }
 
+        public Builder setExtraHeaders(Map<String, String> extraHeaders)
+        {
+            return setProperty(EXTRA_HEADERS, requireNonNull(extraHeaders, "extraHeaders is null"));
+        }
+
         public Builder setSource(String source)
         {
             return setProperty(SOURCE, requireNonNull(source, "source is null"));
@@ -1056,6 +1074,11 @@ public class TrinoUri
         public Builder setValidateConnection(boolean value)
         {
             return setProperty(VALIDATE_CONNECTION, value);
+        }
+
+        public Builder setDisallowLocalRedirect(boolean value)
+        {
+            return setProperty(DISALLOW_LOCAL_REDIRECT, value);
         }
 
         <V, T> Builder setProperty(ConnectionProperty<V, T> connectionProperty, T value)

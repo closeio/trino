@@ -234,7 +234,7 @@ Configure metrics retrieval from the workers in your Prometheus configuration:
       tls_config:
         insecure_skip_verify: true
       basic_auth:
-        username: mysuer # replace with a user with system information permission 
+        username: myuser # replace with a username that has system information permission
         # DO NOT ADD PASSWORD
 ```
 
@@ -272,7 +272,7 @@ configuration:
       - source_labels: [__meta_kubernetes_pod_container_name]
         action: replace
         target_label: container
-      - action: replace  # overide the address to the https ingress address 
+      - action: replace  # override the address to the https ingress address 
         target_label: __address__
         replacement: {{ .Values.trinourl }} 
       metric_relabel_configs:
@@ -292,7 +292,7 @@ configuration:
       tls_config:
         insecure_skip_verify: true
       basic_auth:
-        username: mysuer # replace with a user with system information permission 
+        username: myuser # replace with a username that has system information permission
         password_file: /some/password/file
 ```
 

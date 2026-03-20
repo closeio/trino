@@ -161,7 +161,7 @@ public class TestIcebergVendingRestCatalogConnectorSmokeTest
     }
 
     @Override
-    protected void dropTableFromMetastore(String tableName)
+    protected void dropTableFromCatalog(String tableName)
     {
         // TODO: Get register table tests working
     }
@@ -292,8 +292,7 @@ public class TestIcebergVendingRestCatalogConnectorSmokeTest
                 .isInstanceOf(QueryFailedException.class)
                 .cause()
                 .hasMessageContaining("Failed to drop table")
-                .cause()
-                .hasMessageMatching("Server error: NoSuchKeyException:.*");
+                .hasNoCause();
     }
 
     @Test

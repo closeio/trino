@@ -35,6 +35,7 @@ import io.opentelemetry.api.trace.Span;
 import io.trino.Session;
 import io.trino.block.BlockJsonSerde;
 import io.trino.client.NodeVersion;
+import io.trino.connector.TestingColumnHandle;
 import io.trino.execution.BaseTestSqlTaskManager;
 import io.trino.execution.DynamicFilterConfig;
 import io.trino.execution.DynamicFiltersCollector.VersionedDynamicFilterDomains;
@@ -54,20 +55,20 @@ import io.trino.execution.buffer.PipelinedOutputBuffers;
 import io.trino.metadata.BlockEncodingManager;
 import io.trino.metadata.HandleJsonModule;
 import io.trino.metadata.InternalBlockEncodingSerde;
-import io.trino.metadata.InternalNode;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.Split;
+import io.trino.node.InternalNode;
 import io.trino.server.DynamicFilterService;
 import io.trino.server.FailTaskRequest;
 import io.trino.server.HttpRemoteTaskFactory;
 import io.trino.server.TaskUpdateRequest;
+import io.trino.simd.BlockEncodingSimdSupport;
 import io.trino.spi.ErrorCode;
 import io.trino.spi.QueryId;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockEncodingSerde;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.DynamicFilter;
-import io.trino.spi.connector.TestingColumnHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.Type;
@@ -116,7 +117,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
-import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.inject.Scopes.SINGLETON;
 import static io.airlift.json.JsonBinder.jsonBinder;
@@ -449,7 +449,7 @@ public class TestHttpRemoteTask
         // make sure initial dynamic filter is collected
         CompletableFuture<?> future = dynamicFilter.isBlocked();
         dynamicFilterService.addTaskDynamicFilters(
-                new TaskId(new StageId(queryId.getId(), 1), 1, 0),
+                new TaskId(new StageId(queryId.id(), 1), 1, 0),
                 ImmutableMap.of(filterId1, Domain.singleValue(BIGINT, 1L)));
         future.get();
         assertThat(dynamicFilter.getCurrentPredicate()).isEqualTo(TupleDomain.withColumnDomains(ImmutableMap.of(
@@ -475,7 +475,7 @@ public class TestHttpRemoteTask
 
         future = dynamicFilter.isBlocked();
         dynamicFilterService.addTaskDynamicFilters(
-                new TaskId(new StageId(queryId.getId(), 1), 1, 0),
+                new TaskId(new StageId(queryId.id(), 1), 1, 0),
                 ImmutableMap.of(filterId2, Domain.singleValue(BIGINT, 2L)));
         future.get();
         assertThat(dynamicFilter.getCurrentPredicate()).isEqualTo(TupleDomain.withColumnDomains(ImmutableMap.of(
@@ -677,6 +677,7 @@ public class TestHttpRemoteTask
                         jsonCodecBinder(binder).bindJsonCodec(TaskUpdateRequest.class);
                         jsonCodecBinder(binder).bindJsonCodec(FailTaskRequest.class);
 
+                        binder.bind(BlockEncodingSimdSupport.class).toInstance(new BlockEncodingSimdSupport(true));
                         binder.bind(TypeManager.class).toInstance(TESTING_TYPE_MANAGER);
                         binder.bind(BlockEncodingManager.class).in(SINGLETON);
                         binder.bind(BlockEncodingSerde.class).to(InternalBlockEncodingSerde.class).in(SINGLETON);
@@ -1026,34 +1027,17 @@ public class TestHttpRemoteTask
                     initialTaskStatus.getRunningPartitionedSplitsWeight());
         }
 
-        private static class DynamicFiltersFetchRequest
+        private record DynamicFiltersFetchRequest(
+                String uriInfo,
+                TaskId taskId,
+                Long currentDynamicFiltersVersion,
+                long storedDynamicFiltersVersion)
         {
-            private final String uriInfo;
-            private final TaskId taskId;
-            private final Long currentDynamicFiltersVersion;
-            private final long storedDynamicFiltersVersion;
-
-            private DynamicFiltersFetchRequest(
-                    String uriInfo,
-                    TaskId taskId,
-                    Long currentDynamicFiltersVersion,
-                    long storedDynamicFiltersVersion)
+            private DynamicFiltersFetchRequest
             {
-                this.uriInfo = requireNonNull(uriInfo, "uriInfo is null");
-                this.taskId = requireNonNull(taskId, "taskId is null");
-                this.currentDynamicFiltersVersion = requireNonNull(currentDynamicFiltersVersion, "currentDynamicFiltersVersion is null");
-                this.storedDynamicFiltersVersion = storedDynamicFiltersVersion;
-            }
-
-            @Override
-            public String toString()
-            {
-                return toStringHelper(this)
-                        .add("uriInfo", uriInfo)
-                        .add("taskId", taskId)
-                        .add("currentDynamicFiltersVersion", currentDynamicFiltersVersion)
-                        .add("storedDynamicFiltersVersion", storedDynamicFiltersVersion)
-                        .toString();
+                requireNonNull(uriInfo, "uriInfo is null");
+                requireNonNull(taskId, "taskId is null");
+                requireNonNull(currentDynamicFiltersVersion, "currentDynamicFiltersVersion is null");
             }
         }
     }

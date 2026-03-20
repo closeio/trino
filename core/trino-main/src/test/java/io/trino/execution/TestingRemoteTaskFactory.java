@@ -33,20 +33,21 @@ import io.trino.execution.buffer.OutputBufferInfo;
 import io.trino.execution.buffer.OutputBufferStatus;
 import io.trino.execution.buffer.OutputBuffers;
 import io.trino.execution.buffer.SpoolingOutputStats;
-import io.trino.metadata.InternalNode;
 import io.trino.metadata.Split;
+import io.trino.node.InternalNode;
 import io.trino.operator.TaskStats;
 import io.trino.plugin.base.metrics.TDigestHistogram;
 import io.trino.sql.planner.PlanFragment;
 import io.trino.sql.planner.plan.DynamicFilterId;
 import io.trino.sql.planner.plan.PlanNodeId;
-import org.joda.time.DateTime;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -142,7 +143,7 @@ public class TestingRemoteTaskFactory
         {
             return new TaskInfo(
                     getTaskStatus(),
-                    DateTime.now(),
+                    Instant.now(),
                     new OutputBufferInfo(
                             "TESTING",
                             BufferState.FINISHED,
@@ -157,7 +158,7 @@ public class TestingRemoteTaskFactory
                             Optional.empty(),
                             Optional.empty()),
                     ImmutableSet.copyOf(noMoreSplits),
-                    new TaskStats(DateTime.now(), null),
+                    new TaskStats(Instant.now(), null),
                     Optional.empty(),
                     false);
         }
@@ -185,7 +186,7 @@ public class TestingRemoteTaskFactory
                     DataSize.of(0, BYTE),
                     DataSize.of(0, BYTE),
                     DataSize.of(0, BYTE),
-                    Optional.empty(),
+                    OptionalInt.empty(),
                     DataSize.of(0, BYTE),
                     DataSize.of(0, BYTE),
                     DataSize.of(0, BYTE),

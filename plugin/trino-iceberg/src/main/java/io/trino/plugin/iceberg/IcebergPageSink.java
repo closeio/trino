@@ -140,7 +140,7 @@ public class IcebergPageSink
             IcebergFileWriterFactory fileWriterFactory,
             PageIndexerFactory pageIndexerFactory,
             TrinoFileSystem fileSystem,
-            List<IcebergColumnHandle> inputColumns,
+            List<IcebergColumnHandle> partitionColumns,
             JsonCodec<CommitTaskData> jsonCodec,
             ConnectorSession session,
             IcebergFileFormat fileFormat,
@@ -149,10 +149,11 @@ public class IcebergPageSink
             List<TrinoSortField> sortOrder,
             DataSize sortingFileWriterBufferSize,
             int sortingFileWriterMaxOpenFiles,
+            Optional<String> sortedWritingLocalStagingPath,
             TypeManager typeManager,
             PageSorter pageSorter)
     {
-        requireNonNull(inputColumns, "inputColumns is null");
+        requireNonNull(partitionColumns, "partitionColumns is null");
         this.outputSchema = requireNonNull(outputSchema, "outputSchema is null");
         this.partitionSpec = requireNonNull(partitionSpec, "partitionSpec is null");
         this.locationProvider = requireNonNull(locationProvider, "locationProvider is null");
@@ -163,7 +164,7 @@ public class IcebergPageSink
         this.fileFormat = requireNonNull(fileFormat, "fileFormat is null");
         this.metricsConfig = MetricsConfig.fromProperties(requireNonNull(storageProperties, "storageProperties is null"));
         this.maxOpenWriters = maxOpenWriters;
-        this.pagePartitioner = new PagePartitioner(pageIndexerFactory, toPartitionColumns(inputColumns, partitionSpec, outputSchema));
+        this.pagePartitioner = new PagePartitioner(pageIndexerFactory, toPartitionColumns(partitionColumns, partitionSpec, outputSchema));
         this.targetMaxFileSize = IcebergSessionProperties.getTargetMaxFileSize(session);
         this.idleWriterMinFileSize = IcebergSessionProperties.getIdleWriterMinFileSize(session);
         this.storageProperties = requireNonNull(storageProperties, "storageProperties is null");
@@ -171,12 +172,16 @@ public class IcebergPageSink
         this.sortedWritingEnabled = isSortedWritingEnabled(session);
         this.sortingFileWriterBufferSize = requireNonNull(sortingFileWriterBufferSize, "sortingFileWriterBufferSize is null");
         this.sortingFileWriterMaxOpenFiles = sortingFileWriterMaxOpenFiles;
-        this.tempDirectory = Location.of(locationProvider.newDataLocation("trino-tmp-files"));
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.pageSorter = requireNonNull(pageSorter, "pageSorter is null");
         this.columnTypes = getTopLevelColumns(outputSchema, typeManager).stream()
                 .map(IcebergColumnHandle::getType)
                 .collect(toImmutableList());
+
+        this.tempDirectory = sortedWritingLocalStagingPath
+                .map(path -> path.replace("${USER}", session.getIdentity().getUser()))
+                .map(IcebergPageSink::createLocalSchemeIfAbsent)
+                .orElseGet(() -> Location.of(locationProvider.newDataLocation("trino-tmp-files")));
 
         if (sortedWritingEnabled) {
             ImmutableList.Builder<Integer> sortColumnIndexes = ImmutableList.builder();
@@ -527,22 +532,22 @@ public class IcebergPageSink
         throw new UnsupportedOperationException("Type not supported as partition column: " + type.getDisplayName());
     }
 
-    private static List<PartitionColumn> toPartitionColumns(List<IcebergColumnHandle> handles, PartitionSpec partitionSpec, Schema schema)
+    private static List<PartitionColumn> toPartitionColumns(List<IcebergColumnHandle> partitionColumns, PartitionSpec partitionSpec, Schema schema)
     {
         Map<Integer, Integer> idChannels = new HashMap<>();
-        for (int i = 0; i < handles.size(); i++) {
-            idChannels.put(handles.get(i).getId(), i);
+        for (int i = 0; i < partitionColumns.size(); i++) {
+            idChannels.put(partitionColumns.get(i).getId(), i);
         }
 
         return partitionSpec.fields().stream()
-                .map(field -> getPartitionColumn(field, handles, schema.asStruct(), idChannels))
+                .map(field -> getPartitionColumn(field, partitionColumns, schema.asStruct(), idChannels))
                 .collect(toImmutableList());
     }
 
-    private static PartitionColumn getPartitionColumn(PartitionField field, List<IcebergColumnHandle> handles, Types.StructType schema, Map<Integer, Integer> idChannels)
+    private static PartitionColumn getPartitionColumn(PartitionField field, List<IcebergColumnHandle> partitionColumns, Types.StructType schema, Map<Integer, Integer> idChannels)
     {
         List<Integer> sourceChannels = getIndexPathToField(schema, getNestedFieldIds(schema, field.sourceId()));
-        Type sourceType = handles.get(idChannels.get(field.sourceId())).getType();
+        Type sourceType = partitionColumns.get(idChannels.get(field.sourceId())).getType();
         ColumnTransform transform = getColumnTransform(field, sourceType);
         return new PartitionColumn(field, sourceChannels, sourceType, transform.type(), transform.blockTransform());
     }
@@ -574,7 +579,7 @@ public class IcebergPageSink
             sourceIdsBuilder.add(findFieldPosFromSchema(fieldId, current));
 
             if (i + 1 < nestedFieldIds.size()) {
-                checkState(current.field(fieldId).type().isStructType(), "Could not find field " + nestedFieldIds + " in schema");
+                checkState(current.field(fieldId).type().isStructType(), "Could not find field %s in schema", nestedFieldIds);
                 current = current.field(fieldId).type().asStructType();
             }
         }
@@ -589,6 +594,15 @@ public class IcebergPageSink
             }
         }
         throw new IllegalArgumentException("Could not find field " + fieldId + " in schema");
+    }
+
+    private static Location createLocalSchemeIfAbsent(String path)
+    {
+        Location location = Location.of(path);
+        if (location.scheme().isPresent()) {
+            return location;
+        }
+        return Location.of("local:///" + location.path());
     }
 
     private static class WriteContext

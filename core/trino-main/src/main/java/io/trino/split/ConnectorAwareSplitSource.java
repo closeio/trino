@@ -17,8 +17,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.trino.annotation.NotThreadSafe;
+import io.trino.connector.CatalogHandle;
 import io.trino.metadata.Split;
-import io.trino.spi.connector.CatalogHandle;
 import io.trino.spi.connector.ConnectorSplit;
 import io.trino.spi.connector.ConnectorSplitSource;
 import io.trino.spi.connector.ConnectorSplitSource.ConnectorSplitBatch;
@@ -40,7 +40,7 @@ import static java.util.Objects.requireNonNull;
  * Thread-safety: the implementations is not thread-safe
  *
  * Note: The implementation is internally not thread-safe but also {@link ConnectorSplitSource} is
- * not required to be thread-safe.
+ * not required to be thread-safe, except the close() method which may be called concurrently.
  */
 @NotThreadSafe
 public class ConnectorAwareSplitSource
@@ -95,7 +95,7 @@ public class ConnectorAwareSplitSource
         closeSource();
     }
 
-    private void closeSource()
+    private synchronized void closeSource()
     {
         if (source != null) {
             try {

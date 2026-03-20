@@ -25,8 +25,8 @@ import java.util.concurrent.ExecutorService;
 
 import static com.google.common.util.concurrent.MoreExecutors.listeningDecorator;
 import static com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
+import static io.airlift.bootstrap.ClosingBinder.closingBinder;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
-import static io.trino.plugin.base.ClosingBinder.closingBinder;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 
@@ -82,5 +82,18 @@ public class IcebergExecutorModule
         return newFixedThreadPool(
                 config.getPlanningThreads(),
                 daemonThreadsNamed("iceberg-planning-" + catalogName + "-%s"));
+    }
+
+    @Provides
+    @Singleton
+    @ForIcebergFileDelete
+    public ExecutorService createFileDeleteExecutor(CatalogName catalogName, IcebergConfig config)
+    {
+        if (config.getFileDeleteThreads() == 0) {
+            return newDirectExecutorService();
+        }
+        return newFixedThreadPool(
+                config.getFileDeleteThreads(),
+                daemonThreadsNamed("iceberg-file-delete-" + catalogName + "-%s"));
     }
 }

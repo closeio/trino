@@ -192,7 +192,7 @@ public class TestIcebergTrinoRestCatalogConnectorSmokeTest
     }
 
     @Override
-    protected void dropTableFromMetastore(String tableName)
+    protected void dropTableFromCatalog(String tableName)
     {
         backend.dropTable(toIdentifier(tableName), false);
     }
@@ -232,8 +232,7 @@ public class TestIcebergTrinoRestCatalogConnectorSmokeTest
                 .isInstanceOf(QueryFailedException.class)
                 .cause()
                 .hasMessageContaining("Failed to drop table")
-                .cause()
-                .hasMessageMatching("Server error: NotFoundException: Failed to open input stream for file: (.*)");
+                .hasNoCause();
     }
 
     @Test

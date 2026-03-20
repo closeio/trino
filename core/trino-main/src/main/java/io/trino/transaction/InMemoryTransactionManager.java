@@ -22,17 +22,17 @@ import io.airlift.concurrent.BoundedExecutor;
 import io.airlift.log.Logger;
 import io.airlift.units.Duration;
 import io.trino.NotInTransactionException;
+import io.trino.connector.CatalogHandle;
 import io.trino.metadata.Catalog;
 import io.trino.metadata.CatalogInfo;
 import io.trino.metadata.CatalogManager;
 import io.trino.metadata.CatalogMetadata;
 import io.trino.spi.TrinoException;
 import io.trino.spi.catalog.CatalogName;
-import io.trino.spi.connector.CatalogHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.transaction.IsolationLevel;
-import org.joda.time.DateTime;
 
+import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +57,7 @@ import static com.google.common.util.concurrent.Futures.immediateVoidFuture;
 import static com.google.common.util.concurrent.Futures.nonCancellationPropagating;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.MoreFutures.addExceptionCallback;
+import static io.airlift.units.Duration.succinctDuration;
 import static io.trino.metadata.CatalogManager.NO_CATALOGS;
 import static io.trino.spi.StandardErrorCode.ADMINISTRATIVELY_KILLED;
 import static io.trino.spi.StandardErrorCode.AUTOCOMMIT_WRITE_CONFLICT;
@@ -335,7 +336,7 @@ public class InMemoryTransactionManager
     @ThreadSafe
     private static class TransactionMetadata
     {
-        private final DateTime createTime = DateTime.now();
+        private final Instant createTime = Instant.now();
         private final CatalogManager catalogManager;
         private final TransactionId transactionId;
         private final IsolationLevel isolationLevel;
@@ -423,7 +424,7 @@ public class InMemoryTransactionManager
                     .distinct()
                     .map(key -> registeredCatalogs.getOrDefault(key, Optional.empty()))
                     .flatMap(Optional::stream)
-                    .map(catalog -> new CatalogInfo(catalog.getCatalogName().toString(), catalog.getCatalogHandle(), catalog.getConnectorName()))
+                    .map(catalog -> new CatalogInfo(catalog.getCatalogName().toString(), catalog.getCatalogHandle(), catalog.getConnectorName(), catalog.getCatalogStatus()))
                     .collect(toImmutableList());
         }
 
@@ -436,7 +437,7 @@ public class InMemoryTransactionManager
             return registeredCatalogs.values().stream()
                     .filter(Optional::isPresent)
                     .map(Optional::get)
-                    .map(catalog -> new CatalogInfo(catalog.getCatalogName().toString(), catalog.getCatalogHandle(), catalog.getConnectorName()))
+                    .map(catalog -> new CatalogInfo(catalog.getCatalogName().toString(), catalog.getCatalogHandle(), catalog.getConnectorName(), catalog.getCatalogStatus()))
                     .collect(toImmutableList());
         }
 
@@ -561,7 +562,7 @@ public class InMemoryTransactionManager
         {
             Duration idleTime = Optional.ofNullable(idleStartTime.get())
                     .map(Duration::nanosSince)
-                    .orElse(new Duration(0, MILLISECONDS));
+                    .orElse(succinctDuration(0, MILLISECONDS));
 
             // dereferencing this field is safe because the field is atomic, and activeCatalogs is a concurrent map
             @SuppressWarnings("FieldAccessNotGuarded") Optional<String> writtenCatalogName = Optional.ofNullable(this.writtenCatalog.get())

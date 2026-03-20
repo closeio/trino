@@ -5,11 +5,12 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>476-SNAPSHOT</version>
+        <version>479</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>trino-testing</artifactId>
+    <name>${project.artifactId}</name>
     <description>Trino - Testing utilities</description>
 
     <dependencies>
@@ -31,11 +32,12 @@
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
+            <classifier>classes</classifier>
         </dependency>
 
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
+            <artifactId>okhttp-jvm</artifactId>
         </dependency>
 
         <dependency>
@@ -104,11 +106,6 @@
         </dependency>
 
         <dependency>
-            <groupId>io.airlift.discovery</groupId>
-            <artifactId>discovery-server</artifactId>
-        </dependency>
-
-        <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-api</artifactId>
         </dependency>
@@ -131,6 +128,11 @@
         <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-exchange-filesystem</artifactId>
         </dependency>
 
         <dependency>

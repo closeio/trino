@@ -79,6 +79,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -248,13 +249,11 @@ public final class PlanMatchPattern
     public static PlanMatchPattern indexJoin(
             IndexJoinNode.Type type,
             List<ExpectedValueProvider<IndexJoinNode.EquiJoinClause>> criteria,
-            Optional<String> probeHashSymbol,
-            Optional<String> indexHashSymbol,
             PlanMatchPattern probeSource,
             PlanMatchPattern indexSource)
     {
         return node(IndexJoinNode.class, probeSource, indexSource)
-                .with(new IndexJoinMatcher(type, criteria, probeHashSymbol.map(SymbolAlias::new), indexHashSymbol.map(SymbolAlias::new)));
+                .with(new IndexJoinMatcher(type, criteria));
     }
 
     public static ExpectedValueProvider<IndexJoinNode.EquiJoinClause> indexJoinEquiClause(String probe, String index)
@@ -362,16 +361,7 @@ public final class PlanMatchPattern
     {
         return node(DistinctLimitNode.class, source).with(new DistinctLimitMatcher(
                 limit,
-                toSymbolAliases(distinctSymbols),
-                Optional.empty()));
-    }
-
-    public static PlanMatchPattern distinctLimit(long limit, List<String> distinctSymbols, String hashSymbol, PlanMatchPattern source)
-    {
-        return node(DistinctLimitNode.class, source).with(new DistinctLimitMatcher(
-                limit,
-                toSymbolAliases(distinctSymbols),
-                Optional.of(new SymbolAlias(hashSymbol))));
+                toSymbolAliases(distinctSymbols)));
     }
 
     public static PlanMatchPattern markDistinct(
@@ -381,20 +371,7 @@ public final class PlanMatchPattern
     {
         return node(MarkDistinctNode.class, source).with(new MarkDistinctMatcher(
                 new SymbolAlias(markerSymbol),
-                toSymbolAliases(distinctSymbols),
-                Optional.empty()));
-    }
-
-    public static PlanMatchPattern markDistinct(
-            String markerSymbol,
-            List<String> distinctSymbols,
-            String hashSymbol,
-            PlanMatchPattern source)
-    {
-        return node(MarkDistinctNode.class, source).with(new MarkDistinctMatcher(
-                new SymbolAlias(markerSymbol),
-                toSymbolAliases(distinctSymbols),
-                Optional.of(new SymbolAlias(hashSymbol))));
+                toSymbolAliases(distinctSymbols)));
     }
 
     public static PlanMatchPattern window(Consumer<WindowMatcher.Builder> handler, PlanMatchPattern source)
@@ -629,22 +606,22 @@ public final class PlanMatchPattern
         return exchange(scope, type, partitioningHandle, orderBy, partitionedBy, inputs, ImmutableList.of(), Optional.empty(), sources);
     }
 
-    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, Optional<Integer> partitionCount, PlanMatchPattern... sources)
+    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, OptionalInt partitionCount, PlanMatchPattern... sources)
     {
         return exchange(scope, Optional.empty(), Optional.empty(), ImmutableList.of(), ImmutableSet.of(), Optional.empty(), ImmutableList.of(), Optional.of(partitionCount), sources);
     }
 
-    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, Optional<Integer> partitionCount, PlanMatchPattern... sources)
+    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, OptionalInt partitionCount, PlanMatchPattern... sources)
     {
         return exchange(scope, Optional.of(type), Optional.empty(), ImmutableList.of(), ImmutableSet.of(), Optional.empty(), ImmutableList.of(), Optional.of(partitionCount), sources);
     }
 
-    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, PartitioningHandle partitioningHandle, Optional<Integer> partitionCount, PlanMatchPattern... sources)
+    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, PartitioningHandle partitioningHandle, OptionalInt partitionCount, PlanMatchPattern... sources)
     {
         return exchange(scope, Optional.empty(), Optional.of(partitioningHandle), ImmutableList.of(), ImmutableSet.of(), Optional.empty(), ImmutableList.of(), Optional.of(partitionCount), sources);
     }
 
-    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, PartitioningHandle partitioningHandle, Optional<Integer> partitionCount, PlanMatchPattern... sources)
+    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, PartitioningHandle partitioningHandle, OptionalInt partitionCount, PlanMatchPattern... sources)
     {
         return exchange(scope, Optional.of(type), Optional.of(partitioningHandle), ImmutableList.of(), ImmutableSet.of(), Optional.empty(), ImmutableList.of(), Optional.of(partitionCount), sources);
     }
@@ -657,7 +634,7 @@ public final class PlanMatchPattern
             Set<String> partitionedBy,
             Optional<List<List<String>>> inputs,
             List<String> outputSymbolAliases,
-            Optional<Optional<Integer>> partitionCount,
+            Optional<OptionalInt> partitionCount,
             PlanMatchPattern... sources)
     {
         PlanMatchPattern result = node(ExchangeNode.class, sources)
@@ -814,6 +791,14 @@ public final class PlanMatchPattern
     public static PlanMatchPattern values(int rowCount)
     {
         return values(ImmutableList.of(), nCopies(rowCount, ImmutableList.of()));
+    }
+
+    public static PlanMatchPattern valuesOf(List<String> aliases, List<Expression> expectedRows)
+    {
+        return values(
+                aliasToIndex(aliases),
+                Optional.of(aliases.size()),
+                Optional.of(expectedRows));
     }
 
     public static PlanMatchPattern values(List<String> aliases, List<List<Expression>> expectedRows)

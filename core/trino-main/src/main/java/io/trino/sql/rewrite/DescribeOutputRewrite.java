@@ -45,7 +45,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static io.trino.SystemSessionProperties.isOmitDateTimeTypePrecision;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.VarcharType.VARCHAR;
@@ -57,7 +56,6 @@ import static io.trino.sql.QueryUtil.simpleQuery;
 import static io.trino.sql.QueryUtil.values;
 import static io.trino.sql.analyzer.QueryType.DESCRIBE;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
-import static io.trino.type.TypeUtils.getDisplayLabel;
 import static java.util.Objects.requireNonNull;
 
 public final class DescribeOutputRewrite
@@ -87,7 +85,7 @@ public final class DescribeOutputRewrite
     private static final class Visitor
             extends AstVisitor<Node, Void>
     {
-        private static final Query EMPTY_OUTPUT = createDesctibeOutputQuery(
+        private static final Query EMPTY_OUTPUT = createDescribeOutputQuery(
                 new Row[] {row(
                         new Cast(new NullLiteral(), toSqlType(VARCHAR)),
                         new Cast(new NullLiteral(), toSqlType(VARCHAR)),
@@ -138,10 +136,10 @@ public final class DescribeOutputRewrite
             if (rows.length == 0) {
                 return EMPTY_OUTPUT;
             }
-            return createDesctibeOutputQuery(rows, limit);
+            return createDescribeOutputQuery(rows, limit);
         }
 
-        private static Query createDesctibeOutputQuery(Row[] rows, Optional<Node> limit)
+        private static Query createDescribeOutputQuery(Row[] rows, Optional<Node> limit)
         {
             return simpleQuery(
                     selectList(
@@ -187,7 +185,7 @@ public final class DescribeOutputRewrite
                     new StringLiteral(originTable.map(QualifiedObjectName::catalogName).orElse("")),
                     new StringLiteral(originTable.map(QualifiedObjectName::schemaName).orElse("")),
                     new StringLiteral(originTable.map(QualifiedObjectName::objectName).orElse("")),
-                    new StringLiteral(getDisplayLabel(field.getType(), isOmitDateTimeTypePrecision(session))),
+                    new StringLiteral(field.getType().getDisplayName()),
                     typeSize,
                     new BooleanLiteral(String.valueOf(field.isAliased())));
         }

@@ -21,12 +21,13 @@ import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 import io.trino.execution.QueryStats;
 import io.trino.operator.BlockedReason;
-import org.joda.time.DateTime;
 
+import java.time.Instant;
 import java.util.OptionalDouble;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static io.airlift.units.Duration.succinctDuration;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -37,10 +38,11 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 @Immutable
 public class BasicQueryStats
 {
-    private final DateTime createTime;
-    private final DateTime endTime;
+    private final Instant createTime;
+    private final Instant endTime;
 
     private final Duration queuedTime;
+    private final Duration resourceWaitingTime;
     private final Duration elapsedTime;
     private final Duration executionTime;
 
@@ -52,8 +54,7 @@ public class BasicQueryStats
     private final int completedDrivers;
     private final int blockedDrivers;
 
-    private final DataSize rawInputDataSize;
-    private final long rawInputPositions;
+    private final long processedInputPositions;
     private final DataSize spilledDataSize;
     private final DataSize physicalInputDataSize;
     private final DataSize physicalWrittenDataSize;
@@ -81,9 +82,10 @@ public class BasicQueryStats
 
     @JsonCreator
     public BasicQueryStats(
-            @JsonProperty("createTime") DateTime createTime,
-            @JsonProperty("endTime") DateTime endTime,
+            @JsonProperty("createTime") Instant createTime,
+            @JsonProperty("endTime") Instant endTime,
             @JsonProperty("queuedTime") Duration queuedTime,
+            @JsonProperty("resourceWaitingTime") Duration resourceWaitingTime,
             @JsonProperty("elapsedTime") Duration elapsedTime,
             @JsonProperty("executionTime") Duration executionTime,
             @JsonProperty("failedTasks") int failedTasks,
@@ -92,8 +94,7 @@ public class BasicQueryStats
             @JsonProperty("runningDrivers") int runningDrivers,
             @JsonProperty("completedDrivers") int completedDrivers,
             @JsonProperty("blockedDrivers") int blockedDrivers,
-            @JsonProperty("rawInputDataSize") DataSize rawInputDataSize,
-            @JsonProperty("rawInputPositions") long rawInputPositions,
+            @JsonProperty("processedInputPositions") long processedInputPositions,
             @JsonProperty("spilledDataSize") DataSize spilledDataSize,
             @JsonProperty("physicalInputDataSize") DataSize physicalInputDataSize,
             @JsonProperty("physicalWrittenDataSize") DataSize physicalWrittenDataSize,
@@ -121,6 +122,7 @@ public class BasicQueryStats
         this.endTime = endTime;
 
         this.queuedTime = requireNonNull(queuedTime, "queuedTime is null");
+        this.resourceWaitingTime = requireNonNull(resourceWaitingTime, "resourceWaitingTime is null");
         this.elapsedTime = requireNonNull(elapsedTime, "elapsedTime is null");
         this.executionTime = requireNonNull(executionTime, "executionTime is null");
 
@@ -138,8 +140,7 @@ public class BasicQueryStats
         checkArgument(blockedDrivers >= 0, "blockedDrivers is negative");
         this.blockedDrivers = blockedDrivers;
 
-        this.rawInputDataSize = requireNonNull(rawInputDataSize, "rawInputDataSize is null");
-        this.rawInputPositions = rawInputPositions;
+        this.processedInputPositions = processedInputPositions;
         this.spilledDataSize = spilledDataSize;
         this.physicalInputDataSize = physicalInputDataSize;
         this.physicalWrittenDataSize = physicalWrittenDataSize;
@@ -172,6 +173,7 @@ public class BasicQueryStats
         this(queryStats.getCreateTime(),
                 queryStats.getEndTime(),
                 queryStats.getQueuedTime(),
+                queryStats.getResourceWaitingTime(),
                 queryStats.getElapsedTime(),
                 queryStats.getExecutionTime(),
                 queryStats.getFailedTasks(),
@@ -180,8 +182,7 @@ public class BasicQueryStats
                 queryStats.getRunningDrivers(),
                 queryStats.getCompletedDrivers(),
                 queryStats.getBlockedDrivers(),
-                queryStats.getRawInputDataSize(),
-                queryStats.getRawInputPositions(),
+                queryStats.getProcessedInputPositions(),
                 queryStats.getSpilledDataSize(),
                 queryStats.getPhysicalInputDataSize(),
                 queryStats.getPhysicalWrittenDataSize(),
@@ -208,20 +209,20 @@ public class BasicQueryStats
 
     public static BasicQueryStats immediateFailureQueryStats()
     {
-        DateTime now = DateTime.now();
+        Instant now = Instant.now();
         return new BasicQueryStats(
                 now,
                 now,
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
                 0,
                 0,
                 0,
                 0,
                 0,
                 0,
-                DataSize.ofBytes(0),
                 0,
                 DataSize.ofBytes(0),
                 DataSize.ofBytes(0),
@@ -233,14 +234,14 @@ public class BasicQueryStats
                 DataSize.ofBytes(0),
                 DataSize.ofBytes(0),
                 DataSize.ofBytes(0),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
-                new Duration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
+                succinctDuration(0, MILLISECONDS),
                 false,
                 ImmutableSet.of(),
                 OptionalDouble.empty(),
@@ -248,13 +249,13 @@ public class BasicQueryStats
     }
 
     @JsonProperty
-    public DateTime getCreateTime()
+    public Instant getCreateTime()
     {
         return createTime;
     }
 
     @JsonProperty
-    public DateTime getEndTime()
+    public Instant getEndTime()
     {
         return endTime;
     }
@@ -263,6 +264,12 @@ public class BasicQueryStats
     public Duration getQueuedTime()
     {
         return queuedTime;
+    }
+
+    @JsonProperty
+    public Duration getResourceWaitingTime()
+    {
+        return resourceWaitingTime;
     }
 
     @JsonProperty
@@ -314,15 +321,9 @@ public class BasicQueryStats
     }
 
     @JsonProperty
-    public DataSize getRawInputDataSize()
+    public long getProcessedInputPositions()
     {
-        return rawInputDataSize;
-    }
-
-    @JsonProperty
-    public long getRawInputPositions()
-    {
-        return rawInputPositions;
+        return processedInputPositions;
     }
 
     @JsonProperty

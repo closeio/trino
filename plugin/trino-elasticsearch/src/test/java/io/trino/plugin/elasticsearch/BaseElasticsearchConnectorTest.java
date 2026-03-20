@@ -18,7 +18,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.trino.Session;
 import io.trino.spi.type.VarcharType;
-import io.trino.sql.planner.plan.LimitNode;
 import io.trino.testing.AbstractTestQueries;
 import io.trino.testing.BaseConnectorTest;
 import io.trino.testing.MaterializedResult;
@@ -1712,13 +1711,6 @@ public abstract class BaseElasticsearchConnectorTest
     }
 
     @Test
-    public void testLimitPushdown()
-            throws IOException
-    {
-        assertThat(query("SELECT name FROM nation LIMIT 30")).isNotFullyPushedDown(LimitNode.class); // Use high limit for result determinism
-    }
-
-    @Test
     public void testDataTypesNested()
             throws IOException
     {
@@ -2091,7 +2083,7 @@ public abstract class BaseElasticsearchConnectorTest
 
         Map<String, Object> record2 = new HashMap<>();
         record2.put("id", 2L);
-        record2.put( "root", null);
+        record2.put("root", null);
         index(tableName, record2);
 
         Map<String, Object> record32 = new HashMap<>();
@@ -2118,7 +2110,7 @@ public abstract class BaseElasticsearchConnectorTest
     void testProjectionPushdownWithCaseSensitiveField()
             throws IOException
     {
-        String tableName = "test_projection_with_case_sensitive_field_" + randomNameSuffix();;
+        String tableName = "test_projection_with_case_sensitive_field_" + randomNameSuffix();
         @Language("JSON")
         String properties =
                 """
@@ -2568,7 +2560,7 @@ public abstract class BaseElasticsearchConnectorTest
         try {
             assertThat(query("DESCRIBE \"" + wildcardTable + "\""))
                     .skippingTypesCheck()
-                    .matches( "VALUES ('long_column', 'bigint', '', ''), ('text_column', 'varchar', '', '')");
+                    .matches("VALUES ('long_column', 'bigint', '', ''), ('text_column', 'varchar', '', '')");
             assertThat(query("SELECT * FROM \"" + wildcardTable + "\""))
                     .matches("VALUES (BIGINT '1', VARCHAR 'Trino'), (BIGINT '2', VARCHAR 'rocks')");
 

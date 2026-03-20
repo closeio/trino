@@ -100,8 +100,7 @@ final class S3FileSystemLoader
                         config.getSseCustomerKey()),
                 Optional.empty(),
                 config.getStorageClass(),
-                config.getCannedAcl(),
-                config.isSupportsExclusiveCreate());
+                config.getCannedAcl());
     }
 
     @Override
@@ -301,7 +300,7 @@ final class S3FileSystemLoader
         config.getConnectionTtl().ifPresent(ttl -> client.connectionTimeToLive(ttl.toJavaTime()));
         config.getConnectionMaxIdleTime().ifPresent(time -> client.connectionMaxIdleTime(time.toJavaTime()));
         config.getSocketConnectTimeout().ifPresent(timeout -> client.connectionTimeout(timeout.toJavaTime()));
-        config.getSocketReadTimeout().ifPresent(timeout -> client.socketTimeout(timeout.toJavaTime()));
+        config.getSocketTimeout().ifPresent(timeout -> client.socketTimeout(timeout.toJavaTime()));
 
         if (config.getHttpProxy() != null) {
             client.proxyConfiguration(ProxyConfiguration.builder()

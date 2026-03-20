@@ -13,7 +13,6 @@
  */
 package io.trino.spi.block;
 
-import io.trino.spi.Experimental;
 import jakarta.annotation.Nullable;
 
 import java.util.Optional;
@@ -25,6 +24,7 @@ import static io.trino.spi.block.BlockUtil.checkArrayRange;
 import static io.trino.spi.block.BlockUtil.checkReadablePosition;
 import static io.trino.spi.block.BlockUtil.checkValidRegion;
 import static io.trino.spi.block.BlockUtil.compactArray;
+import static io.trino.spi.block.BlockUtil.compactIsNull;
 import static io.trino.spi.block.BlockUtil.copyIsNullAndAppendNull;
 import static io.trino.spi.block.BlockUtil.ensureCapacity;
 
@@ -140,8 +140,11 @@ public final class IntArrayBlock
     @Override
     public boolean isNull(int position)
     {
+        if (!mayHaveNull()) {
+            return false;
+        }
         checkReadablePosition(this, position);
-        return valueIsNull != null && valueIsNull[position + arrayOffset];
+        return valueIsNull[position + arrayOffset];
     }
 
     @Override
@@ -160,6 +163,7 @@ public final class IntArrayBlock
     {
         checkArrayRange(positions, offset, length);
 
+        boolean hasNull = false;
         boolean[] newValueIsNull = null;
         if (valueIsNull != null) {
             newValueIsNull = new boolean[length];
@@ -169,11 +173,13 @@ public final class IntArrayBlock
             int position = positions[offset + i];
             checkReadablePosition(this, position);
             if (valueIsNull != null) {
-                newValueIsNull[i] = valueIsNull[position + arrayOffset];
+                boolean isNull = valueIsNull[position + arrayOffset];
+                newValueIsNull[i] = isNull;
+                hasNull |= isNull;
             }
             newValues[i] = values[position + arrayOffset];
         }
-        return new IntArrayBlock(0, length, newValueIsNull, newValues);
+        return new IntArrayBlock(0, length, hasNull ? newValueIsNull : null, newValues);
     }
 
     @Override
@@ -190,7 +196,7 @@ public final class IntArrayBlock
         checkValidRegion(getPositionCount(), positionOffset, length);
 
         positionOffset += arrayOffset;
-        boolean[] newValueIsNull = valueIsNull == null ? null : compactArray(valueIsNull, positionOffset, length);
+        boolean[] newValueIsNull = compactIsNull(valueIsNull, positionOffset, length);
         int[] newValues = compactArray(values, positionOffset, length);
 
         if (newValueIsNull == valueIsNull && newValues == values) {
@@ -231,13 +237,11 @@ public final class IntArrayBlock
         return valueIsNull;
     }
 
-    @Experimental(eta = "2023-12-31")
     public int[] getRawValues()
     {
         return values;
     }
 
-    @Experimental(eta = "2023-12-31")
     public int getRawValuesOffset()
     {
         return arrayOffset;

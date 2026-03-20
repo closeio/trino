@@ -19,12 +19,12 @@ import com.google.common.io.Closer;
 import io.trino.FeaturesConfig;
 import io.trino.RowPagesBuilder;
 import io.trino.SequencePageBuilder;
+import io.trino.execution.TaskManagerConfig;
 import io.trino.memory.context.AggregatedMemoryContext;
 import io.trino.operator.PartitionFunction;
 import io.trino.operator.SpillContext;
 import io.trino.operator.TestingOperatorContext;
 import io.trino.spi.Page;
-import io.trino.spi.block.TestingBlockEncodingSerde;
 import io.trino.spi.type.Type;
 import io.trino.spiller.PartitioningSpiller.PartitioningSpillResult;
 import org.junit.jupiter.api.AfterAll;
@@ -45,6 +45,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
+import static io.trino.metadata.InternalBlockEncodingSerde.TESTING_BLOCK_ENCODING_SERDE;
 import static io.trino.operator.PageAssertions.assertPageEquals;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
@@ -82,10 +83,11 @@ public class TestGenericPartitioningSpiller
         featuresConfig.setSpillerThreads("8");
         featuresConfig.setSpillMaxUsedSpaceThreshold(1.0);
         SingleStreamSpillerFactory singleStreamSpillerFactory = new FileSingleStreamSpillerFactory(
-                new TestingBlockEncodingSerde(),
+                TESTING_BLOCK_ENCODING_SERDE,
                 new SpillerStats(),
                 featuresConfig,
-                new NodeSpillConfig());
+                new NodeSpillConfig(),
+                new TaskManagerConfig());
         factory = new GenericPartitioningSpillerFactory(singleStreamSpillerFactory);
         scheduledExecutor = newSingleThreadScheduledExecutor();
     }

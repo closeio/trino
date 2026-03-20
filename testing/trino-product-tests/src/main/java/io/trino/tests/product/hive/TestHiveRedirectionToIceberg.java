@@ -298,7 +298,6 @@ public class TestHiveRedirectionToIceberg
                         "   format = 'PARQUET',\n" +
                         "   format_version = 2,\n" +
                         format("   location = 'hdfs://hadoop-master:9000/user/hive/warehouse/%s-\\E.*\\Q',\n", tableName) +
-                        "   max_commit_retry = 4,\n" +
                         "   partitioning = ARRAY['regionkey']\n" + // 'partitioning' comes from Iceberg
                         ")\\E");
 
@@ -424,7 +423,7 @@ public class TestHiveRedirectionToIceberg
         assertTableComment("iceberg", "default", tableName).isNull();
 
         String tableComment = "This is my table, there are many like it but this one is mine";
-        onTrino().executeQuery(format("COMMENT ON TABLE " + hiveTableName + " IS '%s'", tableComment));
+        onTrino().executeQuery(format("COMMENT ON TABLE %s IS '%s'", hiveTableName, tableComment));
 
         assertTableComment("hive", "default", tableName).isEqualTo(tableComment);
         assertTableComment("iceberg", "default", tableName).isEqualTo(tableComment);

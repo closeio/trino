@@ -168,9 +168,7 @@ public class IterativeOptimizer
             context.checkTimeoutNotExhausted();
 
             done = true;
-            Iterator<Rule<?>> possiblyMatchingRules = ruleIndex.getCandidates(node).iterator();
-            while (possiblyMatchingRules.hasNext()) {
-                Rule<?> rule = possiblyMatchingRules.next();
+            for (Rule<?> rule : ruleIndex.getCandidates(node)) {
                 long timeStart = nanoTime();
                 long timeEnd;
                 boolean invoked = false;
@@ -180,11 +178,9 @@ public class IterativeOptimizer
                     invoked = true;
                     Rule.Result result = transform(node, rule, context);
                     timeEnd = nanoTime();
-                    if (result.getTransformedPlan().isPresent()) {
-                        changedPlanNodeIds.add(result.getTransformedPlan().get().getId());
-                    }
-                    if (result.getTransformedPlan().isPresent()) {
-                        node = context.memo.replace(group, result.getTransformedPlan().get(), rule.getClass().getName());
+                    if (result.isPresent()) {
+                        changedPlanNodeIds.add(result.transformedPlan().get().getId());
+                        node = context.memo.replace(group, result.transformedPlan().get(), rule.getClass().getName());
 
                         applied = true;
                         done = false;
@@ -206,6 +202,7 @@ public class IterativeOptimizer
     {
         Capture<T> nodeCapture = newCapture();
         Pattern<T> pattern = rule.getPattern().capturedAs(nodeCapture);
+        Rule.Context ruleContext = ruleContext(context);
         Iterator<Match> matches = pattern.match(node, context.lookup).iterator();
         while (matches.hasNext()) {
             Match match = matches.next();
@@ -213,7 +210,7 @@ public class IterativeOptimizer
             Rule.Result result;
             try {
                 long start = nanoTime();
-                result = rule.apply(match.capture(nodeCapture), match.captures(), ruleContext(context));
+                result = rule.apply(match.capture(nodeCapture), match.captures(), ruleContext);
 
                 if (LOG.isDebugEnabled() && !result.isEmpty()) {
                     LOG.debug(
@@ -228,7 +225,7 @@ public class IterativeOptimizer
                                     0,
                                     false),
                             PlanPrinter.textLogicalPlan(
-                                    result.getTransformedPlan().get(),
+                                    result.transformedPlan().get(),
                                     plannerContext.getMetadata(),
                                     plannerContext.getFunctionManager(),
                                     StatsAndCosts.empty(),
@@ -245,7 +242,7 @@ public class IterativeOptimizer
             }
             stats.record(rule, duration, !result.isEmpty());
 
-            if (result.getTransformedPlan().isPresent()) {
+            if (result.isPresent()) {
                 return result;
             }
         }
@@ -259,7 +256,7 @@ public class IterativeOptimizer
 
         PlanNode expression = context.memo.getNode(group);
         for (PlanNode child : expression.getSources()) {
-            checkState(child instanceof GroupReference, "Expected child to be a group reference. Found: " + child.getClass().getName());
+            checkState(child instanceof GroupReference, "Expected child to be a group reference. Found: %s", child.getClass().getName());
 
             if (exploreGroup(((GroupReference) child).getGroupId(), context, changedPlanNodeIds)) {
                 progress = true;

@@ -100,9 +100,11 @@ import io.trino.operator.scalar.ArrayDistinctFunction;
 import io.trino.operator.scalar.ArrayElementAtFunction;
 import io.trino.operator.scalar.ArrayExceptFunction;
 import io.trino.operator.scalar.ArrayFilterFunction;
+import io.trino.operator.scalar.ArrayFirstFunction;
 import io.trino.operator.scalar.ArrayHistogramFunction;
 import io.trino.operator.scalar.ArrayIntersectFunction;
 import io.trino.operator.scalar.ArrayJoin;
+import io.trino.operator.scalar.ArrayLastFunction;
 import io.trino.operator.scalar.ArrayMaxFunction;
 import io.trino.operator.scalar.ArrayMinFunction;
 import io.trino.operator.scalar.ArrayNgramsFunction;
@@ -339,6 +341,10 @@ import static io.trino.type.DecimalOperators.DECIMAL_DIVIDE_OPERATOR;
 import static io.trino.type.DecimalOperators.DECIMAL_MODULUS_OPERATOR;
 import static io.trino.type.DecimalOperators.DECIMAL_MULTIPLY_OPERATOR;
 import static io.trino.type.DecimalOperators.DECIMAL_SUBTRACT_OPERATOR;
+import static io.trino.type.DecimalOperators.LEGACY_DECIMAL_ADD_OPERATOR;
+import static io.trino.type.DecimalOperators.LEGACY_DECIMAL_DIVIDE_OPERATOR;
+import static io.trino.type.DecimalOperators.LEGACY_DECIMAL_MULTIPLY_OPERATOR;
+import static io.trino.type.DecimalOperators.LEGACY_DECIMAL_SUBTRACT_OPERATOR;
 import static io.trino.type.DecimalSaturatedFloorCasts.BIGINT_TO_DECIMAL_SATURATED_FLOOR_CAST;
 import static io.trino.type.DecimalSaturatedFloorCasts.DECIMAL_TO_BIGINT_SATURATED_FLOOR_CAST;
 import static io.trino.type.DecimalSaturatedFloorCasts.DECIMAL_TO_DECIMAL_SATURATED_FLOOR_CAST;
@@ -488,6 +494,8 @@ public final class SystemFunctionBundle
                 .functions(IDENTITY_CAST, CAST_FROM_UNKNOWN)
                 .scalar(ArrayRemoveFunction.class)
                 .scalar(ArrayElementAtFunction.class)
+                .scalar(ArrayFirstFunction.class)
+                .scalar(ArrayLastFunction.class)
                 .scalar(ArraySortFunction.class)
                 .scalar(ArraySortComparatorFunction.class)
                 .scalar(ArrayShuffleFunction.class)
@@ -540,7 +548,11 @@ public final class SystemFunctionBundle
                 .functions(DECIMAL_TO_VARCHAR_CAST, DECIMAL_TO_INTEGER_CAST, DECIMAL_TO_BIGINT_CAST, DECIMAL_TO_DOUBLE_CAST, DECIMAL_TO_REAL_CAST, DECIMAL_TO_BOOLEAN_CAST, DECIMAL_TO_TINYINT_CAST, DECIMAL_TO_SMALLINT_CAST)
                 .functions(VARCHAR_TO_DECIMAL_CAST, INTEGER_TO_DECIMAL_CAST, BIGINT_TO_DECIMAL_CAST, DOUBLE_TO_DECIMAL_CAST, REAL_TO_DECIMAL_CAST, BOOLEAN_TO_DECIMAL_CAST, TINYINT_TO_DECIMAL_CAST, SMALLINT_TO_DECIMAL_CAST)
                 .functions(JSON_TO_DECIMAL_CAST, DECIMAL_TO_JSON_CAST)
-                .functions(DECIMAL_ADD_OPERATOR, DECIMAL_SUBTRACT_OPERATOR, DECIMAL_MULTIPLY_OPERATOR, DECIMAL_DIVIDE_OPERATOR, DECIMAL_MODULUS_OPERATOR)
+                .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_ADD_OPERATOR : DECIMAL_ADD_OPERATOR)
+                .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_SUBTRACT_OPERATOR : DECIMAL_SUBTRACT_OPERATOR)
+                .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_MULTIPLY_OPERATOR : DECIMAL_MULTIPLY_OPERATOR)
+                .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_DIVIDE_OPERATOR : DECIMAL_DIVIDE_OPERATOR)
+                .functions(DECIMAL_MODULUS_OPERATOR)
                 .function(DECIMAL_TO_DECIMAL_SATURATED_FLOOR_CAST)
                 .functions(DECIMAL_TO_BIGINT_SATURATED_FLOOR_CAST, BIGINT_TO_DECIMAL_SATURATED_FLOOR_CAST)
                 .functions(DECIMAL_TO_INTEGER_SATURATED_FLOOR_CAST, INTEGER_TO_DECIMAL_SATURATED_FLOOR_CAST)

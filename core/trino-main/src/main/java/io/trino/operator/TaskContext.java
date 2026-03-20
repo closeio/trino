@@ -39,11 +39,11 @@ import io.trino.memory.context.MemoryTrackingContext;
 import io.trino.spi.predicate.Domain;
 import io.trino.sql.planner.LocalDynamicFiltersCollector;
 import io.trino.sql.planner.plan.DynamicFilterId;
-import org.joda.time.DateTime;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Iterables.transform;
 import static io.airlift.units.DataSize.succinctBytes;
+import static io.airlift.units.Duration.succinctDuration;
 import static java.lang.Math.max;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
@@ -83,10 +84,9 @@ public class TaskContext
 
     private final AtomicLong currentPeakUserMemoryReservation = new AtomicLong(0);
 
-    private final AtomicReference<DateTime> executionStartTime = new AtomicReference<>();
-    private final AtomicReference<DateTime> lastExecutionStartTime = new AtomicReference<>();
-    private final AtomicReference<DateTime> terminatingStartTime = new AtomicReference<>();
-    private final AtomicReference<DateTime> executionEndTime = new AtomicReference<>();
+    private final AtomicReference<Instant> executionStartTime = new AtomicReference<>();
+    private final AtomicReference<Instant> lastExecutionStartTime = new AtomicReference<>();
+    private final AtomicReference<Instant> terminatingStartTime = new AtomicReference<>();
 
     private final List<PipelineContext> pipelineContexts = new CopyOnWriteArrayList<>();
 
@@ -207,7 +207,7 @@ public class TaskContext
 
     public void start()
     {
-        DateTime now = DateTime.now();
+        Instant now = Instant.now();
         executionStartTime.compareAndSet(null, now);
         startNanos.compareAndSet(0, System.nanoTime());
         startFullGcCount.compareAndSet(-1, gcMonitor.getMajorGcCount());
@@ -220,10 +220,10 @@ public class TaskContext
     private void updateStatsIfDone(TaskState newState)
     {
         if (newState.isTerminating()) {
-            terminatingStartTime.compareAndSet(null, DateTime.now());
+            terminatingStartTime.compareAndSet(null, Instant.now());
         }
         else if (newState.isDone()) {
-            DateTime now = DateTime.now();
+            Instant now = Instant.now();
             long majorGcCount = gcMonitor.getMajorGcCount();
             long majorGcTime = gcMonitor.getMajorGcTime().roundTo(NANOSECONDS);
 
@@ -238,9 +238,6 @@ public class TaskContext
             // Only update last start time, if the nothing was started
             lastExecutionStartTime.compareAndSet(null, now);
 
-            // use compare and set from initial value to avoid overwriting if there
-            // were a duplicate notification, which shouldn't happen
-            executionEndTime.compareAndSet(null, now);
             endNanos.compareAndSet(0, nanoTimeNow);
             endFullGcCount.compareAndSet(-1, majorGcCount);
             endFullGcTimeNanos.compareAndSet(-1, majorGcTime);
@@ -270,8 +267,11 @@ public class TaskContext
     public DataSize getPeakMemoryReservation()
     {
         long userMemory = taskMemoryContext.getUserMemory();
-        currentPeakUserMemoryReservation.updateAndGet(oldValue -> max(oldValue, userMemory));
-        return DataSize.ofBytes(currentPeakUserMemoryReservation.get());
+        long currentPeakUserMemoryReservation = this.currentPeakUserMemoryReservation.get();
+        if (userMemory > currentPeakUserMemoryReservation) {
+            currentPeakUserMemoryReservation = this.currentPeakUserMemoryReservation.accumulateAndGet(userMemory, Math::max);
+        }
+        return DataSize.ofBytes(currentPeakUserMemoryReservation);
     }
 
     public DataSize getRevocableMemoryReservation()
@@ -388,17 +388,17 @@ public class TaskContext
         checkArgument(oldMaxWriterCount == -1 || oldMaxWriterCount == maxWriterCount, "maxWriterCount already set to %s", oldMaxWriterCount);
     }
 
-    public Optional<Integer> getMaxWriterCount()
+    public OptionalInt getMaxWriterCount()
     {
         int value = maxWriterCount.get();
-        return value == -1 ? Optional.empty() : Optional.of(value);
+        return value == -1 ? OptionalInt.empty() : OptionalInt.of(value);
     }
 
     public Duration getFullGcTime()
     {
         long startFullGcTimeNanos = this.startFullGcTimeNanos.get();
         if (startFullGcTimeNanos < 0) {
-            return new Duration(0, MILLISECONDS);
+            return succinctDuration(0, MILLISECONDS);
         }
 
         long endFullGcTimeNanos = this.endFullGcTimeNanos.get();
@@ -461,6 +461,8 @@ public class TaskContext
         int blockedDrivers = 0;
         int completedDrivers = 0;
 
+        long spilledDataSize = 0;
+
         long totalScheduledTime = 0;
         long totalCpuTime = 0;
         long totalBlockedTime = 0;
@@ -471,9 +473,6 @@ public class TaskContext
 
         long internalNetworkInputDataSize = 0;
         long internalNetworkInputPositions = 0;
-
-        long rawInputDataSize = 0;
-        long rawInputPositions = 0;
 
         long processedInputDataSize = 0;
         long processedInputPositions = 0;
@@ -493,7 +492,7 @@ public class TaskContext
 
         for (PipelineStats pipeline : pipelineStats) {
             if (pipeline.getLastEndTime() != null) {
-                lastExecutionEndTime = max(pipeline.getLastEndTime().getMillis(), lastExecutionEndTime);
+                lastExecutionEndTime = max(pipeline.getLastEndTime().toEpochMilli(), lastExecutionEndTime);
             }
             if (pipeline.getRunningDrivers() > 0 || pipeline.getRunningPartitionedDrivers() > 0 || pipeline.getBlockedDrivers() > 0) {
                 // pipeline is running
@@ -512,6 +511,8 @@ public class TaskContext
             blockedDrivers += pipeline.getBlockedDrivers();
             completedDrivers += pipeline.getCompletedDrivers();
 
+            spilledDataSize += pipeline.getSpilledDataSize().toBytes();
+
             totalScheduledTime += pipeline.getTotalScheduledTime().roundTo(NANOSECONDS);
             totalCpuTime += pipeline.getTotalCpuTime().roundTo(NANOSECONDS);
             totalBlockedTime += pipeline.getTotalBlockedTime().roundTo(NANOSECONDS);
@@ -523,9 +524,6 @@ public class TaskContext
 
                 internalNetworkInputDataSize += pipeline.getInternalNetworkInputDataSize().toBytes();
                 internalNetworkInputPositions += pipeline.getInternalNetworkInputPositions();
-
-                rawInputDataSize += pipeline.getRawInputDataSize().toBytes();
-                rawInputPositions += pipeline.getRawInputPositions();
 
                 processedInputDataSize += pipeline.getProcessedInputDataSize().toBytes();
                 processedInputPositions += pipeline.getProcessedInputPositions();
@@ -583,8 +581,8 @@ public class TaskContext
                 executionStartTime.get(),
                 lastExecutionStartTime.get(),
                 terminatingStartTime.get(),
-                lastExecutionEndTime == 0 ? null : new DateTime(lastExecutionEndTime),
-                executionEndTime.get(),
+                lastExecutionEndTime == 0 ? null : Instant.ofEpochMilli(lastExecutionEndTime),
+                taskStateMachine.getEndTime(),
                 elapsedTime.convertToMostSuccinctTimeUnit(),
                 queuedTime.convertToMostSuccinctTimeUnit(),
                 totalDrivers,
@@ -600,6 +598,7 @@ public class TaskContext
                 succinctBytes(userMemory),
                 getPeakMemoryReservation().succinct(),
                 succinctBytes(taskMemoryContext.getRevocableMemory()),
+                succinctBytes(spilledDataSize),
                 new Duration(totalScheduledTime, NANOSECONDS).convertToMostSuccinctTimeUnit(),
                 new Duration(totalCpuTime, NANOSECONDS).convertToMostSuccinctTimeUnit(),
                 new Duration(totalBlockedTime, NANOSECONDS).convertToMostSuccinctTimeUnit(),
@@ -610,8 +609,6 @@ public class TaskContext
                 new Duration(physicalInputReadTime, NANOSECONDS).convertToMostSuccinctTimeUnit(),
                 succinctBytes(internalNetworkInputDataSize),
                 internalNetworkInputPositions,
-                succinctBytes(rawInputDataSize),
-                rawInputPositions,
                 succinctBytes(processedInputDataSize),
                 processedInputPositions,
                 new Duration(inputBlockedTime, NANOSECONDS).convertToMostSuccinctTimeUnit(),

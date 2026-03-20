@@ -21,7 +21,6 @@ import io.airlift.json.ObjectMapperProvider;
 import io.trino.metadata.ResolvedFunction;
 import io.trino.metadata.TestingFunctionResolution;
 import io.trino.spi.connector.SortOrder;
-import io.trino.spi.type.TestingTypeManager;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeSignature;
 import io.trino.sql.planner.OrderingScheme;
@@ -42,6 +41,7 @@ import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_FOLLOWING;
 import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_PRECEDING;
 import static io.trino.sql.planner.plan.WindowFrameType.RANGE;
+import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestWindowNode
@@ -56,11 +56,11 @@ public class TestWindowNode
         // dependencies copied from ServerMainModule.java to avoid depending on whole ServerMainModule here
         ObjectMapperProvider provider = new ObjectMapperProvider();
         provider.setKeyDeserializers(ImmutableMap.of(
-                Symbol.class, new SymbolKeyDeserializer(new TestingTypeManager()),
+                Symbol.class, new SymbolKeyDeserializer(TESTING_TYPE_MANAGER),
                 TypeSignature.class, new TypeSignatureKeyDeserializer()));
 
         provider.setJsonDeserializers(ImmutableMap.of(
-                Type.class, new TypeDeserializer(new TestingTypeManager()::getType)));
+                Type.class, new TypeDeserializer(TESTING_TYPE_MANAGER::getType)));
 
         objectMapper = provider.get();
     }
@@ -94,14 +94,12 @@ public class TestWindowNode
                         ImmutableList.of(columnB),
                         ImmutableMap.of(columnB, SortOrder.ASC_NULLS_FIRST))));
         Map<Symbol, WindowNode.Function> functions = ImmutableMap.of(windowSymbol, new WindowNode.Function(resolvedFunction, ImmutableList.of(columnC.toSymbolReference()), Optional.empty(), frame, false, false));
-        Optional<Symbol> hashSymbol = Optional.of(columnB);
         Set<Symbol> prePartitionedInputs = ImmutableSet.of(columnA);
         WindowNode windowNode = new WindowNode(
                 id,
                 sourceNode,
                 specification,
                 functions,
-                hashSymbol,
                 prePartitionedInputs,
                 0);
 
@@ -113,7 +111,6 @@ public class TestWindowNode
         assertThat(actualNode.getSpecification()).isEqualTo(windowNode.getSpecification());
         assertThat(actualNode.getWindowFunctions()).isEqualTo(windowNode.getWindowFunctions());
         assertThat(actualNode.getFrames()).isEqualTo(windowNode.getFrames());
-        assertThat(actualNode.getHashSymbol()).isEqualTo(windowNode.getHashSymbol());
         assertThat(actualNode.getPrePartitionedInputs()).isEqualTo(windowNode.getPrePartitionedInputs());
         assertThat(actualNode.getPreSortedOrderPrefix()).isEqualTo(windowNode.getPreSortedOrderPrefix());
     }

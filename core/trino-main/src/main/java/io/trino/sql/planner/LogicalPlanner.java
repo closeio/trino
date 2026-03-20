@@ -22,6 +22,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.context.Context;
 import io.trino.Session;
+import io.trino.connector.CatalogHandle;
 import io.trino.cost.CachingCostProvider;
 import io.trino.cost.CachingStatsProvider;
 import io.trino.cost.CachingTableStatsProvider;
@@ -46,7 +47,6 @@ import io.trino.operator.RetryPolicy;
 import io.trino.spi.ErrorCodeSupplier;
 import io.trino.spi.RefreshType;
 import io.trino.spi.TrinoException;
-import io.trino.spi.connector.CatalogHandle;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.ConnectorTableMetadata;
@@ -120,6 +120,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Function;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -489,7 +490,7 @@ public class LogicalPlanner
                 .map(ColumnMetadata::getName)
                 .collect(toImmutableList());
 
-        TableStatisticsMetadata statisticsMetadata = metadata.getStatisticsCollectionMetadataForWrite(session, catalogHandle, tableMetadata);
+        TableStatisticsMetadata statisticsMetadata = metadata.getStatisticsCollectionMetadataForWrite(session, catalogHandle, tableMetadata, create.isReplace());
 
         return createTableWriterPlan(
                 analysis,
@@ -518,7 +519,10 @@ public class LogicalPlanner
 
         List<Symbol> visibleFieldMappings = visibleFields(plan);
 
+        PlanBuilder planBuilder = newPlanBuilder(plan, analysis, ImmutableMap.of(), ImmutableMap.of(), session, plannerContext);
+
         Map<String, ColumnHandle> columns = metadata.getColumnHandles(session, tableHandle);
+        Map<ColumnHandle, io.trino.sql.tree.Expression> defaultColumnValues = analysis.getDefaultColumnValues(table);
         Assignments.Builder assignments = Assignments.builder();
         boolean supportsMissingColumnsOnInsert = metadata.supportsMissingColumnsOnInsert(session, tableHandle);
         ImmutableList.Builder<ColumnMetadata> insertedColumnsBuilder = ImmutableList.builder();
@@ -530,12 +534,20 @@ public class LogicalPlanner
             Symbol output = symbolAllocator.newSymbol(column.getName(), column.getType());
             Expression expression;
             Type tableType = column.getType();
-            int index = insertColumns.indexOf(columns.get(column.getName()));
+            ColumnHandle columnHandle = columns.get(column.getName());
+            int index = insertColumns.indexOf(columnHandle);
             if (index < 0) {
                 if (supportsMissingColumnsOnInsert) {
                     continue;
                 }
-                expression = new Constant(column.getType(), null);
+                if (column.getDefaultValue().isPresent()) {
+                    io.trino.sql.tree.Expression defaultExpression = defaultColumnValues.get(columnHandle);
+                    expression = planBuilder.rewrite(defaultExpression);
+                    expression = noTruncationCast(metadata, expression, expression.type(), tableType);
+                }
+                else {
+                    expression = new Constant(column.getType(), null);
+                }
             }
             else {
                 Symbol input = visibleFieldMappings.get(index);
@@ -589,7 +601,7 @@ public class LogicalPlanner
                 .map(ColumnMetadata::getName)
                 .collect(toImmutableList());
 
-        TableStatisticsMetadata statisticsMetadata = metadata.getStatisticsCollectionMetadataForWrite(session, tableHandle.catalogHandle(), tableMetadata.metadata());
+        TableStatisticsMetadata statisticsMetadata = metadata.getStatisticsCollectionMetadataForWrite(session, tableHandle.catalogHandle(), tableMetadata.metadata(), false);
 
         if (materializedViewRefreshWriterTarget.isPresent()) {
             RefreshType refreshType = IncrementalRefreshVisitor.canIncrementallyRefresh(plan.getRoot());
@@ -623,7 +635,7 @@ public class LogicalPlanner
         if (queryType.equals(tableType)) {
             return fieldMapping.toSymbolReference();
         }
-        return noTruncationCast(fieldMapping.toSymbolReference(), queryType, tableType);
+        return noTruncationCast(metadata, fieldMapping.toSymbolReference(), queryType, tableType);
     }
 
     private Expression createNullNotAllowedFailExpression(String columnName, Type type)
@@ -697,9 +709,9 @@ public class LogicalPlanner
         Optional<PartitioningScheme> partitioningScheme = Optional.empty();
 
         int maxWriterTasks = target.getMaxWriterTasks(plannerContext.getMetadata(), session).orElse(getMaxWriterTaskCount(session));
-        Optional<Integer> maxWritersNodesCount = getRetryPolicy(session) != RetryPolicy.TASK
-                ? Optional.of(Math.min(maxWriterTasks, getMaxWriterTaskCount(session)))
-                : Optional.empty();
+        OptionalInt maxWritersNodesCount = getRetryPolicy(session) != RetryPolicy.TASK
+                ? OptionalInt.of(Math.min(maxWriterTasks, getMaxWriterTaskCount(session)))
+                : OptionalInt.empty();
 
         if (writeTableLayout.isPresent()) {
             List<Symbol> partitionFunctionArguments = new ArrayList<>();
@@ -722,9 +734,9 @@ public class LogicalPlanner
                 partitioningScheme = Optional.of(new PartitioningScheme(
                         Partitioning.create(FIXED_HASH_DISTRIBUTION, partitionFunctionArguments),
                         outputLayout,
-                        Optional.empty(),
                         false,
                         Optional.empty(),
+                        OptionalInt.empty(),
                         maxWritersNodesCount));
             }
         }
@@ -796,7 +808,7 @@ public class LogicalPlanner
     TODO Once BINARY and parametric VARBINARY types are supported, they should be handled here.
     TODO This workaround is insufficient to handle structural types
      */
-    private Expression noTruncationCast(Expression expression, Type fromType, Type toType)
+    public static Expression noTruncationCast(Metadata metadata, Expression expression, Type fromType, Type toType)
     {
         if (fromType instanceof UnknownType || (!(toType instanceof VarcharType) && !(toType instanceof CharType))) {
             return new Cast(expression, toType);
@@ -955,7 +967,9 @@ public class LogicalPlanner
         if (!analysis.isTableExecuteReadsData()) {
             SimpleTableExecuteNode node = new SimpleTableExecuteNode(
                     idAllocator.getNextId(),
-                    symbolAllocator.newSymbol("rows", BIGINT),
+                    ImmutableList.of(
+                            symbolAllocator.newSymbol("metricName", VARCHAR),
+                            symbolAllocator.newSymbol("metricValue", BIGINT)),
                     executeHandle);
             return new RelationPlan(node, analysis.getRootScope(), node.getOutputSymbols(), Optional.empty());
         }
@@ -1009,15 +1023,15 @@ public class LogicalPlanner
             else if (isUsePreferredWritePartitioning(session)) {
                 // empty connector partitioning handle means evenly partitioning on partitioning columns
                 int maxWriterTasks = tableExecuteTarget.getMaxWriterTasks(plannerContext.getMetadata(), session).orElse(getMaxWriterTaskCount(session));
-                Optional<Integer> maxWritersNodesCount = getRetryPolicy(session) != RetryPolicy.TASK
-                        ? Optional.of(Math.min(maxWriterTasks, getMaxWriterTaskCount(session)))
-                        : Optional.empty();
+                OptionalInt maxWritersNodesCount = getRetryPolicy(session) != RetryPolicy.TASK
+                        ? OptionalInt.of(Math.min(maxWriterTasks, getMaxWriterTaskCount(session)))
+                        : OptionalInt.empty();
                 partitioningScheme = Optional.of(new PartitioningScheme(
                         Partitioning.create(FIXED_HASH_DISTRIBUTION, partitionFunctionArguments),
                         outputLayout,
-                        Optional.empty(),
                         false,
                         Optional.empty(),
+                        OptionalInt.empty(),
                         maxWritersNodesCount));
             }
         }

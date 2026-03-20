@@ -16,7 +16,10 @@ package io.trino.spi.block;
 import io.airlift.slice.SliceInput;
 import io.airlift.slice.SliceOutput;
 import io.airlift.slice.Slices;
+import jakarta.annotation.Nullable;
 
+import static io.trino.spi.block.EncoderUtil.compactBytesWithNullsScalar;
+import static io.trino.spi.block.EncoderUtil.compactBytesWithNullsVectorized;
 import static io.trino.spi.block.EncoderUtil.decodeNullBits;
 import static io.trino.spi.block.EncoderUtil.encodeNullsAsBits;
 import static io.trino.spi.block.EncoderUtil.retrieveNullBits;
@@ -26,6 +29,13 @@ public class ByteArrayBlockEncoding
         implements BlockEncoding
 {
     public static final String NAME = "BYTE_ARRAY";
+
+    private final boolean enableVectorizedNullSuppression;
+
+    public ByteArrayBlockEncoding(boolean enableVectorizedNullSuppression)
+    {
+        this.enableVectorizedNullSuppression = enableVectorizedNullSuppression;
+    }
 
     @Override
     public String getName()
@@ -46,23 +56,23 @@ public class ByteArrayBlockEncoding
         int positionCount = byteArrayBlock.getPositionCount();
         sliceOutput.appendInt(positionCount);
 
-        encodeNullsAsBits(sliceOutput, byteArrayBlock);
+        int rawOffset = byteArrayBlock.getRawValuesOffset();
+        @Nullable
+        boolean[] isNull = byteArrayBlock.getRawValueIsNull();
+        byte[] rawValues = byteArrayBlock.getRawValues();
 
-        if (!byteArrayBlock.mayHaveNull()) {
-            sliceOutput.writeBytes(byteArrayBlock.getValuesSlice());
+        encodeNullsAsBits(sliceOutput, isNull, rawOffset, positionCount);
+
+        if (isNull == null) {
+            sliceOutput.writeBytes(rawValues, rawOffset, positionCount);
         }
         else {
-            byte[] valuesWithoutNull = new byte[positionCount];
-            int nonNullPositionCount = 0;
-            for (int i = 0; i < positionCount; i++) {
-                valuesWithoutNull[nonNullPositionCount] = byteArrayBlock.getByte(i);
-                if (!byteArrayBlock.isNull(i)) {
-                    nonNullPositionCount++;
-                }
+            if (enableVectorizedNullSuppression) {
+                compactBytesWithNullsVectorized(sliceOutput, rawValues, isNull, rawOffset, positionCount);
             }
-
-            sliceOutput.writeInt(nonNullPositionCount);
-            sliceOutput.writeBytes(Slices.wrappedBuffer(valuesWithoutNull, 0, nonNullPositionCount));
+            else {
+                compactBytesWithNullsScalar(sliceOutput, rawValues, isNull, rawOffset, positionCount);
+            }
         }
     }
 

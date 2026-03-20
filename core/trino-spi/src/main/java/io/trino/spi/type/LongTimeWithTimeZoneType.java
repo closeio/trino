@@ -20,7 +20,6 @@ import io.trino.spi.block.BlockBuilderStatus;
 import io.trino.spi.block.Fixed12Block;
 import io.trino.spi.block.Fixed12BlockBuilder;
 import io.trino.spi.block.PageBuilderStatus;
-import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.function.BlockIndex;
 import io.trino.spi.function.BlockPosition;
 import io.trino.spi.function.FlatFixed;
@@ -96,19 +95,6 @@ final class LongTimeWithTimeZoneType
     }
 
     @Override
-    public void appendTo(Block block, int position, BlockBuilder blockBuilder)
-    {
-        if (block.isNull(position)) {
-            blockBuilder.appendNull();
-        }
-        else {
-            Fixed12Block valueBlock = (Fixed12Block) block.getUnderlyingValueBlock();
-            int valuePosition = block.getUnderlyingValuePosition(position);
-            write(blockBuilder, getPicos(valueBlock, valuePosition), getOffsetMinutes(valueBlock, valuePosition));
-        }
-    }
-
-    @Override
     public LongTimeWithTimeZone getObject(Block block, int position)
     {
         Fixed12Block valueBlock = (Fixed12Block) block.getUnderlyingValueBlock();
@@ -129,7 +115,7 @@ final class LongTimeWithTimeZoneType
     }
 
     @Override
-    public Object getObjectValue(ConnectorSession session, Block block, int position)
+    public Object getObjectValue(Block block, int position)
     {
         if (block.isNull(position)) {
             return null;
@@ -184,10 +170,10 @@ final class LongTimeWithTimeZoneType
     @ScalarOperator(READ_VALUE)
     private static void writeFlat(
             LongTimeWithTimeZone value,
-            byte[] fixedSizeSlice,
-            int fixedSizeOffset,
-            byte[] unusedVariableSizeSlice,
-            int unusedVariableSizeOffset)
+            @FlatFixed byte[] fixedSizeSlice,
+            @FlatFixedOffset int fixedSizeOffset,
+            @FlatVariableWidth byte[] unusedVariableSizeSlice,
+            @FlatVariableOffset int unusedVariableSizeOffset)
     {
         LONG_HANDLE.set(fixedSizeSlice, fixedSizeOffset, value.getPicoseconds());
         INT_HANDLE.set(fixedSizeSlice, fixedSizeOffset + SIZE_OF_LONG, value.getOffsetMinutes());
@@ -197,10 +183,10 @@ final class LongTimeWithTimeZoneType
     private static void writeBlockFlat(
             @BlockPosition Fixed12Block block,
             @BlockIndex int position,
-            byte[] fixedSizeSlice,
-            int fixedSizeOffset,
-            byte[] unusedVariableSizeSlice,
-            int unusedVariableSizeOffset)
+            @FlatFixed byte[] fixedSizeSlice,
+            @FlatFixedOffset int fixedSizeOffset,
+            @FlatVariableWidth byte[] unusedVariableSizeSlice,
+            @FlatVariableOffset int unusedVariableSizeOffset)
     {
         LONG_HANDLE.set(fixedSizeSlice, fixedSizeOffset, getPicos(block, position));
         INT_HANDLE.set(fixedSizeSlice, fixedSizeOffset + SIZE_OF_LONG, getOffsetMinutes(block, position));
@@ -226,6 +212,22 @@ final class LongTimeWithTimeZoneType
                 getOffsetMinutes(rightBlock, rightPosition));
     }
 
+    @ScalarOperator(EQUAL)
+    private static boolean equalOperator(
+            @FlatFixed byte[] fixedSizeSlice,
+            @FlatFixedOffset int fixedSizeOffset,
+            @FlatVariableWidth byte[] unusedVariableSizeSlice,
+            @FlatVariableOffset int unusedVariableSizeOffset,
+            @BlockPosition Fixed12Block rightBlock,
+            @BlockIndex int rightPosition)
+    {
+        return equal(
+                (long) LONG_HANDLE.get(fixedSizeSlice, fixedSizeOffset),
+                (int) INT_HANDLE.get(fixedSizeSlice, fixedSizeOffset + SIZE_OF_LONG),
+                getPicos(rightBlock, rightPosition),
+                getOffsetMinutes(rightBlock, rightPosition));
+    }
+
     private static boolean equal(long leftPicos, int leftOffsetMinutes, long rightPicos, int rightOffsetMinutes)
     {
         return normalizePicos(leftPicos, leftOffsetMinutes) == normalizePicos(rightPicos, rightOffsetMinutes);
@@ -243,6 +245,16 @@ final class LongTimeWithTimeZoneType
         return hashCodeOperator(getPicos(block, position), getOffsetMinutes(block, position));
     }
 
+    @ScalarOperator(HASH_CODE)
+    private static long hashCodeOperator(
+            @FlatFixed byte[] fixedSizeSlice,
+            @FlatFixedOffset int fixedSizeOffset,
+            @FlatVariableWidth byte[] unusedVariableSizeSlice,
+            @FlatVariableOffset int unusedVariableSizeOffset)
+    {
+        return hashCodeOperator((long) LONG_HANDLE.get(fixedSizeSlice, fixedSizeOffset), (int) INT_HANDLE.get(fixedSizeSlice, fixedSizeOffset + SIZE_OF_LONG));
+    }
+
     private static long hashCodeOperator(long picos, int offsetMinutes)
     {
         return AbstractLongType.hash(normalizePicos(picos, offsetMinutes));
@@ -258,6 +270,18 @@ final class LongTimeWithTimeZoneType
     private static long xxHash64Operator(@BlockPosition Fixed12Block block, @BlockIndex int position)
     {
         return xxHash64(getPicos(block, position), getOffsetMinutes(block, position));
+    }
+
+    @ScalarOperator(XX_HASH_64)
+    private static long xxHash64Operator(
+            @FlatFixed byte[] fixedSizeSlice,
+            @FlatFixedOffset int fixedSizeOffset,
+            @FlatVariableWidth byte[] unusedVariableSizeSlice,
+            @FlatVariableOffset int unusedVariableSizeOffset)
+    {
+        return xxHash64(
+                (long) LONG_HANDLE.get(fixedSizeSlice, fixedSizeOffset),
+                (int) INT_HANDLE.get(fixedSizeSlice, fixedSizeOffset + SIZE_OF_LONG));
     }
 
     private static long xxHash64(long picos, int offsetMinutes)

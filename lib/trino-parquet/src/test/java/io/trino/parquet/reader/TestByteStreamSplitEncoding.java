@@ -22,7 +22,7 @@ import io.trino.spi.block.Block;
 import io.trino.spi.block.IntArrayBlock;
 import io.trino.spi.connector.SourcePage;
 import io.trino.spi.type.Type;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
@@ -35,7 +35,6 @@ import static io.trino.memory.context.AggregatedMemoryContext.newSimpleAggregate
 import static io.trino.parquet.ParquetTestUtils.createParquetReader;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.RealType.REAL;
-import static io.trino.testing.TestingConnectorSession.SESSION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestByteStreamSplitEncoding
@@ -49,7 +48,7 @@ public class TestByteStreamSplitEncoding
 
         ParquetDataSource dataSource = new FileParquetDataSource(
                 new File(Resources.getResource("byte_stream_split_float_and_double.parquet").toURI()),
-                new ParquetReaderOptions());
+                ParquetReaderOptions.defaultOptions());
         ParquetMetadata parquetMetadata = MetadataReader.readFooter(dataSource, Optional.empty());
         ParquetReader reader = createParquetReader(dataSource, parquetMetadata, newSimpleAggregatedMemoryContext(), types, columnNames);
 
@@ -88,10 +87,10 @@ public class TestByteStreamSplitEncoding
                     List<Double> expectedValues = expected.get(channel);
                     for (int postition = 0; postition < block.getPositionCount(); postition++) {
                         if (block instanceof IntArrayBlock) {
-                            assertThat(REAL.getObjectValue(SESSION, block, postition)).isEqualTo(expectedValues.get(rowCount + postition).floatValue());
+                            assertThat(REAL.getObjectValue(block, postition)).isEqualTo(expectedValues.get(rowCount + postition).floatValue());
                         }
                         else {
-                            assertThat(DOUBLE.getObjectValue(SESSION, block, postition)).isEqualTo(expectedValues.get(rowCount + postition));
+                            assertThat(DOUBLE.getObjectValue(block, postition)).isEqualTo(expectedValues.get(rowCount + postition));
                         }
                     }
                 }

@@ -188,7 +188,6 @@ public class BenchmarkInCodeGenerator
 
             FunctionManager functionManager = createTestingFunctionManager();
             processor = new ExpressionCompiler(
-                    new CursorProcessorCompiler(functionManager),
                     new PageFunctionCompiler(functionManager, 0),
                     new ColumnarFilterCompiler(functionManager, 0))
                     .compilePageProcessor(
@@ -224,7 +223,7 @@ public class BenchmarkInCodeGenerator
         }
     }
 
-    public static void main(String[] args)
+    static void main()
             throws RunnerException
     {
         Benchmarks.benchmark(BenchmarkInCodeGenerator.class).run();

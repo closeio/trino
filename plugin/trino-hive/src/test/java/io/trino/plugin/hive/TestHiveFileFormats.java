@@ -52,6 +52,7 @@ import io.trino.plugin.hive.parquet.ParquetReaderConfig;
 import io.trino.plugin.hive.parquet.ParquetWriterConfig;
 import io.trino.plugin.hive.rcfile.RcFilePageSourceFactory;
 import io.trino.plugin.hive.util.HiveTypeTranslator;
+import io.trino.spi.NodeVersion;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.block.ArrayBlockBuilder;
@@ -104,9 +105,13 @@ import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormat;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -128,6 +133,7 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
@@ -215,11 +221,12 @@ import static org.apache.hadoop.io.SequenceFile.CompressionType.BLOCK;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.data.Offset.offset;
 import static org.joda.time.DateTimeZone.UTC;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 // Failing on multiple threads because of org.apache.hadoop.hive.ql.io.parquet.write.ParquetRecordWriterWrapper
 // uses a single record writer across all threads.
 // For example org.apache.parquet.column.values.factory.DefaultValuesWriterFactory#DEFAULT_V1_WRITER_FACTORY is shared mutable state.
-@Test(singleThreaded = true)
+@Execution(ExecutionMode.SAME_THREAD)
 public final class TestHiveFileFormats
 {
     private static final DateTimeZone HIVE_STORAGE_TIME_ZONE = DateTimeZone.forID("America/Bahia_Banderas");
@@ -229,20 +236,18 @@ public final class TestHiveFileFormats
     private static final ConnectorSession PARQUET_SESSION = getHiveSession(createParquetHiveConfig(false));
     private static final ConnectorSession PARQUET_SESSION_USE_NAME = getHiveSession(createParquetHiveConfig(true));
 
-    @DataProvider(name = "rowCount")
-    public static Object[][] rowCountProvider()
+    static Stream<Integer> rowCount()
     {
-        return new Object[][] {{0}, {1000}};
+        return Stream.of(0, 1000);
     }
 
-    @DataProvider(name = "validRowAndFileSizePadding")
-    public static Object[][] validFileSizePaddingProvider()
+    static Stream<Arguments> validRowAndFileSizePadding()
     {
-        return new Object[][] {{0, 0L}, {0, 16L}, {10, 1L}, {1000, 64L}};
+        return Stream.of(arguments(0, 0L), arguments(0, 16L), arguments(10, 1L), arguments(1000, 64L));
     }
 
-    @BeforeClass(alwaysRun = true)
-    public void setUp()
+    @BeforeAll
+    public static void setUp()
     {
         // ensure the expected timezone is configured for this VM
         assertThat(TimeZone.getDefault().getID())
@@ -250,7 +255,8 @@ public final class TestHiveFileFormats
                 .isEqualTo("America/Bahia_Banderas");
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testTextFile(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -267,8 +273,9 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new SimpleTextFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
-    public void testSequenceFile(int rowCount, long fileSizePadding)
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
+    public void testTextSequenceFile(int rowCount, long fileSizePadding)
             throws Exception
     {
         List<TestColumn> testColumns = TEST_COLUMNS.stream()
@@ -284,7 +291,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new SimpleSequenceFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testCsvFile(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -316,7 +324,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new CsvPageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testJson(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -346,7 +355,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new JsonPageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testOpenXJson(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -365,7 +375,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new OpenXJsonPageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testRcTextPageSource(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -376,7 +387,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new RcFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testRcTextOptimizedWriter(int rowCount)
             throws Exception
     {
@@ -392,7 +404,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new RcFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testRcBinaryPageSource(int rowCount)
             throws Exception
     {
@@ -409,7 +422,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new RcFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testRcBinaryOptimizedWriter(int rowCount)
             throws Exception
     {
@@ -435,7 +449,8 @@ public final class TestHiveFileFormats
                 .withColumns(testColumnsNoTimestamps);
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testOrc(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -446,7 +461,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new OrcPageSourceFactory(new OrcReaderOptions(), fileSystemFactory, STATS, UTC));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testOrcOptimizedWriter(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -475,7 +491,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new OrcPageSourceFactory(new OrcReaderOptions(), fileSystemFactory, STATS, UTC));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testOrcUseColumnNames(int rowCount)
             throws Exception
     {
@@ -494,7 +511,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new OrcPageSourceFactory(new OrcReaderOptions(), fileSystemFactory, STATS, UTC));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testOrcUseColumnNameLowerCaseConversion(int rowCount)
             throws Exception
     {
@@ -511,7 +529,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new OrcPageSourceFactory(new OrcReaderOptions(), fileSystemFactory, STATS, UTC));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testAvro(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -523,7 +542,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(AvroPageSourceFactory::new);
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public static void testAvroFileInSymlinkTable(int rowCount)
             throws Exception
     {
@@ -544,7 +564,8 @@ public final class TestHiveFileFormats
                 .collect(toList());
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testParquetPageSource(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -554,10 +575,11 @@ public final class TestHiveFileFormats
                 .withSession(PARQUET_SESSION)
                 .withRowsCount(rowCount)
                 .withFileSizePadding(fileSizePadding)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
     }
 
-    @Test(dataProvider = "validRowAndFileSizePadding")
+    @ParameterizedTest
+    @MethodSource("validRowAndFileSizePadding")
     public void testParquetPageSourceGzip(int rowCount, long fileSizePadding)
             throws Exception
     {
@@ -568,10 +590,11 @@ public final class TestHiveFileFormats
                 .withCompressionCodec(HiveCompressionCodec.GZIP)
                 .withFileSizePadding(fileSizePadding)
                 .withRowsCount(rowCount)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testParquetWriter(int rowCount)
             throws Exception
     {
@@ -583,10 +606,11 @@ public final class TestHiveFileFormats
                 .withColumns(testColumns)
                 .withRowsCount(rowCount)
                 .withFileWriterFactory(fileSystemFactory -> new ParquetFileWriterFactory(fileSystemFactory, new NodeVersion("test-version"), TESTING_TYPE_MANAGER, new HiveConfig(), STATS))
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testParquetPageSourceSchemaEvolution(int rowCount)
             throws Exception
     {
@@ -601,7 +625,7 @@ public final class TestHiveFileFormats
                 .withReadColumns(readColumns)
                 .withSession(PARQUET_SESSION)
                 .withRowsCount(rowCount)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
 
         // test the name-based access
         readColumns = writeColumns.reversed();
@@ -609,10 +633,11 @@ public final class TestHiveFileFormats
                 .withWriteColumns(writeColumns)
                 .withReadColumns(readColumns)
                 .withSession(PARQUET_SESSION_USE_NAME)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testParquetCaseSensitivity(int rowCount)
             throws Exception
     {
@@ -627,7 +652,7 @@ public final class TestHiveFileFormats
                 .withSession(getHiveSession(createParquetHiveConfig(true), new ParquetWriterConfig().setValidationPercentage(0)))
                 .withRowsCount(rowCount)
                 .withFileWriterFactory(fileSystemFactory -> new ParquetFileWriterFactory(fileSystemFactory, new NodeVersion("test-version"), TESTING_TYPE_MANAGER, new HiveConfig(), STATS))
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
     }
 
     private static List<TestColumn> getTestColumnsSupportedByParquet()
@@ -670,7 +695,7 @@ public final class TestHiveFileFormats
                 .withWriteColumns(ImmutableList.of(writeColumn))
                 .withReadColumns(ImmutableList.of(readColumn))
                 .withSession(PARQUET_SESSION)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
 
         assertThatFileFormat(AVRO)
                 .withWriteColumns(ImmutableList.of(writeColumn))
@@ -691,7 +716,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new SimpleTextFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testAvroProjectedColumns(int rowCount)
             throws Exception
     {
@@ -715,7 +741,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(AvroPageSourceFactory::new);
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testParquetProjectedColumns(int rowCount)
             throws Exception
     {
@@ -736,17 +763,18 @@ public final class TestHiveFileFormats
                 .withReadColumns(readColumns)
                 .withRowsCount(rowCount)
                 .withSession(PARQUET_SESSION)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
 
         assertThatFileFormat(PARQUET)
                 .withWriteColumns(writeColumns)
                 .withReadColumns(readColumns)
                 .withRowsCount(rowCount)
                 .withSession(PARQUET_SESSION_USE_NAME)
-                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()));
+                .isReadableByPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testORCProjectedColumns(int rowCount)
             throws Exception
     {
@@ -777,7 +805,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new OrcPageSourceFactory(new OrcReaderOptions(), fileSystemFactory, STATS, UTC));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testSequenceFileProjectedColumns(int rowCount)
             throws Exception
     {
@@ -804,7 +833,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new SimpleSequenceFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testTextFileProjectedColumns(int rowCount)
             throws Exception
     {
@@ -832,7 +862,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new SimpleTextFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testRCTextProjectedColumnsPageSource(int rowCount)
             throws Exception
     {
@@ -855,7 +886,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new RcFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testRCBinaryProjectedColumns(int rowCount)
             throws Exception
     {
@@ -888,7 +920,8 @@ public final class TestHiveFileFormats
                 .isReadableByPageSource(fileSystemFactory -> new RcFilePageSourceFactory(fileSystemFactory, new HiveConfig()));
     }
 
-    @Test(dataProvider = "rowCount")
+    @ParameterizedTest
+    @MethodSource("rowCount")
     public void testRCBinaryProjectedColumnsPageSource(int rowCount)
             throws Exception
     {
@@ -944,7 +977,7 @@ public final class TestHiveFileFormats
         assertThatFileFormat(PARQUET)
                 .withColumns(columns)
                 .withSession(PARQUET_SESSION)
-                .isFailingForPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, new ParquetReaderConfig(), new HiveConfig()), expectedErrorCode, expectedMessage);
+                .isFailingForPageSource(fileSystemFactory -> new ParquetPageSourceFactory(fileSystemFactory, STATS, Optional.empty(), new ParquetReaderConfig(), new HiveConfig()), expectedErrorCode, expectedMessage);
     }
 
     private static void testPageSourceFactory(
@@ -999,25 +1032,24 @@ public final class TestHiveFileFormats
                 Instant.now().toEpochMilli());
 
         ConnectorPageSource pageSource = HivePageSourceProvider.createHivePageSource(
-                ImmutableSet.of(sourceFactory),
-                session,
-                location,
-                OptionalInt.empty(),
-                0,
-                fileSize,
-                paddedFileSize,
-                12345,
-                new Schema(storageFormat.getSerde(), false, splitProperties),
-                TupleDomain.all(),
-                TESTING_TYPE_MANAGER,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                false,
-                NO_ACID_TRANSACTION,
-                columnMappings)
+                        ImmutableSet.of(sourceFactory),
+                        session,
+                        location,
+                        OptionalInt.empty(),
+                        0,
+                        fileSize,
+                        paddedFileSize,
+                        12345,
+                        new Schema(storageFormat.getSerde(), false, splitProperties),
+                        TupleDomain.all(),
+                        TESTING_TYPE_MANAGER,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        false,
+                        NO_ACID_TRANSACTION,
+                        columnMappings)
                 .orElseThrow();
-
         checkPageSource(pageSource, testReadColumns, rowCount);
     }
 
@@ -1110,7 +1142,7 @@ public final class TestHiveFileFormats
                     else {
                         BlockBuilder builder = type.createBlockBuilder(null, 1);
                         type.writeObject(builder, expectedValue);
-                        expectedValue = type.getObjectValue(SESSION, builder.build(), 0);
+                        expectedValue = type.getObjectValue(builder.build(), 0);
                         assertThat(actualValue)
                                 .describedAs("Wrong value for column " + testColumn.name())
                                 .isEqualTo(expectedValue);

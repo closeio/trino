@@ -17,7 +17,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
 import io.trino.spi.connector.ConnectorOutputTableHandle;
-import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.SchemaTableName;
 
 import java.util.List;
@@ -32,11 +31,10 @@ public record IcebergWritableTableHandle(
         Map<Integer, String> partitionsSpecsAsJson,
         int partitionSpecId,
         List<TrinoSortField> sortOrder,
-        List<IcebergColumnHandle> inputColumns,
+        List<IcebergColumnHandle> partitionColumns,
         String outputPath,
         IcebergFileFormat fileFormat,
         Map<String, String> storageProperties,
-        RetryMode retryMode,
         Map<String, String> fileIoProperties)
         implements ConnectorInsertTableHandle, ConnectorOutputTableHandle
 {
@@ -46,11 +44,10 @@ public record IcebergWritableTableHandle(
         requireNonNull(schemaAsJson, "schemaAsJson is null");
         partitionsSpecsAsJson = ImmutableMap.copyOf(requireNonNull(partitionsSpecsAsJson, "partitionsSpecsAsJson is null"));
         sortOrder = ImmutableList.copyOf(requireNonNull(sortOrder, "sortOrder is null"));
-        inputColumns = ImmutableList.copyOf(requireNonNull(inputColumns, "inputColumns is null"));
+        partitionColumns = ImmutableList.copyOf(requireNonNull(partitionColumns, "partitionColumns is null"));
         requireNonNull(outputPath, "outputPath is null");
         requireNonNull(fileFormat, "fileFormat is null");
         storageProperties = ImmutableMap.copyOf(requireNonNull(storageProperties, "storageProperties is null"));
-        requireNonNull(retryMode, "retryMode is null");
         checkArgument(partitionsSpecsAsJson.containsKey(partitionSpecId), "partitionSpecId missing from partitionSpecs");
         fileIoProperties = ImmutableMap.copyOf(requireNonNull(fileIoProperties, "fileIoProperties is null"));
     }

@@ -70,7 +70,7 @@ public class TestGroupBy
                 "SELECT CAST(row(x) AS row(\"a\" bigint)) " +
                         "FROM (VALUES 42) t(x) " +
                         "GROUP BY CAST(row(x) AS row(\"A\" bigint))"))
-                .failure().hasMessage("line 1:8: 'CAST(ROW (x) AS ROW(\"a\" bigint))' must be an aggregate expression or appear in GROUP BY clause");
+                .failure().hasMessage("line 1:8: 'CAST(ROW(x) AS ROW(\"a\" bigint))' must be an aggregate expression or appear in GROUP BY clause");
     }
 
     @Test
@@ -192,6 +192,22 @@ public class TestGroupBy
                 """
                 SELECT a, sum(b)
                 FROM (VALUES (1, 10), (1, 20)) t(a, b)
+                GROUP BY AUTO
+                """))
+                .matches("VALUES (1, BIGINT '30')");
+
+        assertThat(assertions.query(
+                """
+                SELECT a, -sum(b)
+                FROM (VALUES (1, 10), (1, 20)) t(a, b)
+                GROUP BY AUTO
+                """))
+                .matches("VALUES (1, BIGINT '-30')");
+
+        assertThat(assertions.query(
+                """
+                SELECT a, abs(sum(b))
+                FROM (VALUES (1, -10), (1, -20)) t(a, b)
                 GROUP BY AUTO
                 """))
                 .matches("VALUES (1, BIGINT '30')");

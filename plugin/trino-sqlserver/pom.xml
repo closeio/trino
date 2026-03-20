@@ -5,12 +5,13 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>476-SNAPSHOT</version>
+        <version>479</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>trino-sqlserver</artifactId>
     <packaging>trino-plugin</packaging>
+    <name>${project.artifactId}</name>
     <description>Trino - SQL Server connector</description>
 
     <dependencies>
@@ -22,6 +23,7 @@
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
+            <classifier>classes</classifier>
         </dependency>
 
         <dependency>
@@ -182,13 +184,6 @@
 
         <dependency>
             <groupId>io.trino</groupId>
-            <artifactId>trino-plugin-toolkit</artifactId>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>io.trino</groupId>
             <artifactId>trino-testing</artifactId>
             <scope>test</scope>
         </dependency>
@@ -243,19 +238,19 @@
 
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>jdbc</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>mssqlserver</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-mssqlserver</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

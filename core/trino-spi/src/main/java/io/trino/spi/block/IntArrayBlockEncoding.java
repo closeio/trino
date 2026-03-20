@@ -15,7 +15,10 @@ package io.trino.spi.block;
 
 import io.airlift.slice.SliceInput;
 import io.airlift.slice.SliceOutput;
+import jakarta.annotation.Nullable;
 
+import static io.trino.spi.block.EncoderUtil.compactIntsWithNullsScalar;
+import static io.trino.spi.block.EncoderUtil.compactIntsWithNullsVectorized;
 import static io.trino.spi.block.EncoderUtil.decodeNullBits;
 import static io.trino.spi.block.EncoderUtil.encodeNullsAsBits;
 import static io.trino.spi.block.EncoderUtil.retrieveNullBits;
@@ -25,6 +28,13 @@ public class IntArrayBlockEncoding
         implements BlockEncoding
 {
     public static final String NAME = "INT_ARRAY";
+
+    private final boolean enableVectorizedNullSuppression;
+
+    public IntArrayBlockEncoding(boolean enableVectorizedNullSuppression)
+    {
+        this.enableVectorizedNullSuppression = enableVectorizedNullSuppression;
+    }
 
     @Override
     public String getName()
@@ -45,23 +55,23 @@ public class IntArrayBlockEncoding
         int positionCount = intArrayBlock.getPositionCount();
         sliceOutput.appendInt(positionCount);
 
-        encodeNullsAsBits(sliceOutput, intArrayBlock);
+        int rawOffset = intArrayBlock.getRawValuesOffset();
+        @Nullable
+        boolean[] isNull = intArrayBlock.getRawValueIsNull();
+        int[] rawValues = intArrayBlock.getRawValues();
 
-        if (!intArrayBlock.mayHaveNull()) {
-            sliceOutput.writeInts(intArrayBlock.getRawValues(), intArrayBlock.getRawValuesOffset(), intArrayBlock.getPositionCount());
+        encodeNullsAsBits(sliceOutput, isNull, rawOffset, positionCount);
+
+        if (isNull == null) {
+            sliceOutput.writeInts(rawValues, rawOffset, positionCount);
         }
         else {
-            int[] valuesWithoutNull = new int[positionCount];
-            int nonNullPositionCount = 0;
-            for (int i = 0; i < positionCount; i++) {
-                valuesWithoutNull[nonNullPositionCount] = intArrayBlock.getInt(i);
-                if (!intArrayBlock.isNull(i)) {
-                    nonNullPositionCount++;
-                }
+            if (enableVectorizedNullSuppression) {
+                compactIntsWithNullsVectorized(sliceOutput, rawValues, isNull, rawOffset, positionCount);
             }
-
-            sliceOutput.writeInt(nonNullPositionCount);
-            sliceOutput.writeInts(valuesWithoutNull, 0, nonNullPositionCount);
+            else {
+                compactIntsWithNullsScalar(sliceOutput, rawValues, isNull, rawOffset, positionCount);
+            }
         }
     }
 

@@ -217,6 +217,15 @@ implementation is used:
   -  Enable [sorted writing](iceberg-sorted-files) to tables with a specified sort order. Equivalent
      session property is `sorted_writing_enabled`.
   -  `true` 
+* - `iceberg.sorted-writing.local-staging-path`
+  -  A local directory that Trino can use for staging writes to sorted tables.
+     The `${USER}` placeholder can be used to use a different
+     location for each user. When this property is not configured, the target 
+     storage will be used for staging while writing to sorted tables which can
+     be inefficient when writing to object stores like S3. When 
+     `fs.hadoop.enabled` is not enabled, using this feature requires setup of 
+     [local file system](/object-storage/file-system-local)
+  -  
 * - `iceberg.allowed-extra-properties`
   -  List of extra properties that are allowed to be set on Iceberg tables.
      Use `*` to allow all properties.
@@ -228,6 +237,9 @@ implementation is used:
   - Number of threads used for retrieving metadata. Currently, only table loading 
     is parallelized.
   - `8`
+* - `iceberg.file-delete-threads`
+  - Number of threads to use for deleting files when running `expire_snapshots` procedure.
+  - Double the number of processors on the coordinator node.
 * - `iceberg.bucket-execution`
   - Enable bucket-aware execution. This allows the engine to use physical
     bucketing information to optimize queries by reducing data exchanges.
@@ -744,7 +756,7 @@ WHERE system.bucket(custkey, 16) = 2;
 ### Data management
 
 The {ref}`sql-data-management` functionality includes support for `INSERT`,
-`UPDATE`, `DELETE`, and `MERGE` statements.
+`UPDATE`, `DELETE`, `TRUNCATE`, and `MERGE` statements.
 
 (iceberg-delete)=
 #### Deletion by partition
@@ -802,7 +814,47 @@ created before the partitioning change.
 The connector supports the following commands for use with {ref}`ALTER TABLE
 EXECUTE <alter-table-execute>`.
 
-```{include} optimize.fragment
+##### optimize
+
+The `optimize` command is used for rewriting the content of the specified
+table so that it is merged into fewer but larger files. If the table is
+partitioned, the data compaction acts separately on each partition selected for
+optimization. This operation improves read performance.
+
+All files with a size below the optional `file_size_threshold` parameter
+(default value for the threshold is `100MB`) are merged in case any of the
+following conditions are met per partition:
+
+-  more than one data file to merge is present
+-  at least one data file, with delete files attached, is present
+
+```sql
+ALTER TABLE test_table EXECUTE optimize
+```
+
+The following statement merges files in a table that are
+under 128 megabytes in size:
+
+```sql
+ALTER TABLE test_table EXECUTE optimize(file_size_threshold => '128MB')
+```
+
+You can use a `WHERE` clause with the columns used to partition the table
+to filter which partitions are optimized:
+
+```sql
+ALTER TABLE test_partitioned_table EXECUTE optimize
+WHERE partition_key = 1
+```
+
+You can use a more complex `WHERE` clause to narrow down the scope of the
+`optimize` procedure. The following example casts the timestamp values to
+dates, and uses a comparison to only optimize partitions with data from the year
+2022 or newer:
+
+```
+ALTER TABLE test_table EXECUTE optimize
+WHERE CAST(timestamp_tz AS DATE) > DATE '2021-12-31'
 ```
 
 Use a `WHERE` clause with [metadata columns](iceberg-metadata-columns) to filter
@@ -850,6 +902,14 @@ procedure fails with a similar message: `Retention specified (1.00d) is shorter
 than the minimum retention configured in the system (7.00d)`. The default value
 for this property is `7d`.
 
+The command accepts an optional `retain_last` parameter to specify the minimum
+number of ancestor snapshots to preserve (defaults to 1), regardless of the
+`retention_threshold` value.
+
+The command accepts an optional `clean_expired_metadata` parameter (defaults to false).
+When true, cleans up metadata such as partition specs and schemas that are no
+longer referenced by snapshots.
+
 (iceberg-remove-orphan-files)=
 ##### remove_orphan_files
 
@@ -864,11 +924,38 @@ time is recommended to keep size of a table's data directory under control.
 ALTER TABLE test_table EXECUTE remove_orphan_files(retention_threshold => '7d');
 ```
 
+```text
+        metric_name         | metric_value
+----------------------------+--------------
+ processed_manifests_count  |            2
+ active_files_count         |           98
+ scanned_files_count        |           97
+ deleted_files_count        |            0
+```
+
 The value for `retention_threshold` must be higher than or equal to
 `iceberg.remove-orphan-files.min-retention` in the catalog otherwise the
 procedure fails with a similar message: `Retention specified (1.00d) is shorter
 than the minimum retention configured in the system (7.00d)`. The default value
 for this property is `7d`.
+
+The output of the query has the following metrics:
+
+:::{list-table} Output
+:widths: 40, 60
+:header-rows: 1
+
+* - Property name
+  - Description
+* - `processed_manifests_count`
+  - The count of manifest files read by remove_orphan_files.
+* - `active_files_count`
+  - The count of files belonging to snapshots that have not been expired.
+* - `scanned_files_count`
+  - The count of files scanned from the file system.
+* - `deleted_files_count`
+  - The count of files deleted by remove_orphan_files.
+:::
 
 (drop-extended-stats)=
 ##### drop_extended_stats
@@ -930,8 +1017,13 @@ connector using a {doc}`WITH </sql/create-table-as>` clause.
   - Description
 * - `format`
   - Optionally specifies the format of table data files; either `PARQUET`,
-    `ORC`, or `AVRO`. Defaults to the value of the `iceberg.file-format` catalog
-    configuration property, which defaults to `PARQUET`.
+    `ORC`, or `AVRO`. Defaults to the value of the `iceberg.file-format` 
+    catalog configuration property, which defaults to `PARQUET`.
+* - `compression_codec`
+  - Optionally specifies the compression-codec used for writing the table; 
+    either `NONE`, `ZSTD`, `SNAPPY`, `LZ4`, or `GZIP`. Defaults to the value 
+    of the `iceberg.compression-codec` catalog configuration property, which 
+    defaults to `ZSTD`.
 * - `partitioning`
   - Optionally specifies table partitioning. If a table is partitioned by
     columns `c1` and `c2`, the partitioning property is `partitioning =
@@ -989,9 +1081,9 @@ WITH (
     location = '/var/example_tables/test_table');
 ```
 
-The table definition below specifies to use ORC files, bloom filter index by columns
-`c1` and `c2`, fpp is 0.05, and a file system location of
-`/var/example_tables/test_table`:
+The table definition below specifies to use ORC files with compression_codec
+SNAPPY, bloom filter index by columns `c1` and `c2`, fpp is 0.05, and a file
+system location of `/var/example_tables/test_table`:
 
 ```sql
 CREATE TABLE test_table (
@@ -1000,6 +1092,7 @@ CREATE TABLE test_table (
     c3 DOUBLE)
 WITH (
     format = 'ORC',
+    compression_codec = 'SNAPPY',
     location = '/var/example_tables/test_table',
     orc_bloom_filter_columns = ARRAY['c1', 'c2'],
     orc_bloom_filter_fpp = 0.05);
@@ -2096,7 +2189,8 @@ enabled, metadata caching in coordinator memory is deactivated.
 
 Additionally, you can use the following catalog configuration properties:
 
-:::{list-table} Memory metadata caching configuration properties :widths: 25, 75
+:::{list-table} Memory metadata caching configuration properties
+:widths: 25, 75
 :header-rows: 1
 
 * - Property
@@ -2111,4 +2205,4 @@ Additionally, you can use the following catalog configuration properties:
     Defaults to `200MB`.
 * - `fs.memory-cache.max-content-length`
   - The maximum file size that can be cached. Defaults to `15MB`.
-  :::
+ :::
