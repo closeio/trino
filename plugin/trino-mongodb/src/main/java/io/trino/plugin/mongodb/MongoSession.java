@@ -28,6 +28,7 @@ import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.mongodb.DBRef;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
+import com.mongodb.client.ClientSession;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -65,6 +66,7 @@ import io.trino.spi.type.TypeManager;
 import io.trino.spi.type.TypeSignature;
 import io.trino.spi.type.TypeSignatureParameter;
 import io.trino.spi.type.VarcharType;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.types.Binary;
 import org.bson.types.Decimal128;
@@ -542,6 +544,42 @@ public class MongoSession
         }
 
         return iterable.iterator();
+    }
+
+    public MongoCursor<Document> execute(ClientSession session, MongoTableHandle tableHandle, List<MongoColumnHandle> columns)
+    {
+        Set<MongoColumnHandle> projectedColumns = tableHandle.projectedColumns();
+        checkArgument(projectedColumns.isEmpty() || projectedColumns.containsAll(columns), "projectedColumns must be empty or equal to columns");
+
+        Document projection = buildProjection(columns, implicitPrefix);
+
+        MongoCollection<Document> collection = getCollection(tableHandle.remoteTableName());
+        Document filter = buildFilter(tableHandle);
+        FindIterable<Document> iterable = collection.find(session, filter).projection(projection).collation(SIMPLE_COLLATION);
+        tableHandle.limit().ifPresent(iterable::limit);
+        log.debug("Find documents: collection: %s, filter: %s, projection: %s", tableHandle.schemaTableName(), filter, projection);
+
+        if (cursorBatchSize != 0) {
+            iterable.batchSize(cursorBatchSize);
+        }
+
+        return iterable.iterator();
+    }
+
+    public ClientSession startSession()
+    {
+        return getClient().startSession();
+    }
+
+    public void killSession(BsonDocument sessionId)
+    {
+        try {
+            getClient().getDatabase("admin")
+                    .runCommand(new Document("killSessions", List.of(sessionId)));
+        }
+        catch (Exception e) {
+            log.debug(e, "Failed to kill MongoDB session %s", sessionId);
+        }
     }
 
     @VisibleForTesting
