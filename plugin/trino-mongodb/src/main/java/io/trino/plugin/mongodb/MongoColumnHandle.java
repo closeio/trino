@@ -28,8 +28,10 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * @param dbRefField Represent if the field is inside a DBRef type. The getter may return a wrong value when row type use the same field names and types as dbref.
+ * @param dbRefColumn Represent if the base column is a confirmed MongoDB DBRef object (detected during schema inference). Unlike dbRefField, this is only true for
+ *                    columns where the MongoDB Java driver returned an actual DBRef instance, not for plain documents that happen to have the same field structure.
  */
-public record MongoColumnHandle(String baseName, List<String> dereferenceNames, Type type, boolean hidden, boolean dbRefField, Optional<String> comment)
+public record MongoColumnHandle(String baseName, List<String> dereferenceNames, Type type, boolean hidden, boolean dbRefField, boolean dbRefColumn, Optional<String> comment)
         implements ColumnHandle
 {
     public MongoColumnHandle
@@ -72,6 +74,7 @@ public record MongoColumnHandle(String baseName, List<String> dereferenceNames, 
                 .append("type", type.getTypeSignature().toString())
                 .append("hidden", hidden)
                 .append("dbRefField", dbRefField)
+                .append("dbRefColumn", dbRefColumn)
                 .append("comment", comment.orElse(null));
     }
 

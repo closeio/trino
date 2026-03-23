@@ -314,6 +314,7 @@ public class TestMongoProjectionPushdownPlans
                 type,
                 baseColumnHandle.hidden(),
                 baseColumnHandle.dbRefField(),
+                baseColumnHandle.dbRefColumn(),
                 baseColumnHandle.comment());
     }
 }

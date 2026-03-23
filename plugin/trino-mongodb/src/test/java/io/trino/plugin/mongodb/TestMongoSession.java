@@ -48,7 +48,7 @@ public class TestMongoSession
     private static final MongoColumnHandle COL5 = createColumnHandle("col5", BIGINT);
     private static final MongoColumnHandle COL6 = createColumnHandle("grandparent", createUnboundedVarcharType(), "parent", "col6");
 
-    private static final MongoColumnHandle ID_COL = new MongoColumnHandle("_id", ImmutableList.of(), ObjectIdType.OBJECT_ID, false, false, Optional.empty());
+    private static final MongoColumnHandle ID_COL = new MongoColumnHandle("_id", ImmutableList.of(), ObjectIdType.OBJECT_ID, false, false, false, Optional.empty());
 
     @Test
     public void testBuildProjectionWithoutId()
@@ -239,6 +239,89 @@ public class TestMongoSession
                 .hasSize(1);
     }
 
+    @Test
+    public void testBuildQueryDbRefSingleFieldUsesdotNotation()
+    {
+        // A single DBRef sub-field predicate should use dot notation with the correct MongoDB key name
+        MongoColumnHandle creatorId = createDbRefSubColumnHandle("creator", MongoSession.ID, createUnboundedVarcharType());
+        TupleDomain<ColumnHandle> domain = TupleDomain.withColumnDomains(
+                ImmutableMap.of(creatorId, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("abc123"))));
+
+        Document query = MongoSession.buildQuery(domain);
+        assertThat(query).isEqualTo(new Document("creator.$id", new Document("$eq", "abc123")));
+    }
+
+    @Test
+    public void testBuildQueryDbRefTwoFieldsUsesDotNotation()
+    {
+        // Two DBRef sub-field equality predicates (without the third) should use dot-notation.
+        // Subdocument equality would require an exact match of all fields, so it would miss DBRefs
+        // that have an additional $db field. Dot-notation correctly matches any DBRef with those values.
+        MongoColumnHandle creatorId = createDbRefSubColumnHandle("creator", MongoSession.ID, createUnboundedVarcharType());
+        MongoColumnHandle creatorCollection = createDbRefSubColumnHandle("creator", MongoSession.COLLECTION_NAME, createUnboundedVarcharType());
+        TupleDomain<ColumnHandle> domain = TupleDomain.withColumnDomains(ImmutableMap.of(
+                creatorId, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("abc123")),
+                creatorCollection, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("mycoll"))));
+
+        Document query = MongoSession.buildQuery(domain);
+        assertThat(query).isEqualTo(new Document("$and", ImmutableList.of(
+                new Document("creator.$id", new Document("$eq", "abc123")),
+                new Document("creator.$ref", new Document("$eq", "mycoll")))));
+    }
+
+    @Test
+    public void testBuildQueryDbRefAllThreeFieldsUsesSubdocument()
+    {
+        // All three DBRef sub-field equality predicates → subdocument in MongoDB-standard field order: $ref, $id, $db
+        MongoColumnHandle creatorId = createDbRefSubColumnHandle("creator", MongoSession.ID, createUnboundedVarcharType());
+        MongoColumnHandle creatorCollection = createDbRefSubColumnHandle("creator", MongoSession.COLLECTION_NAME, createUnboundedVarcharType());
+        MongoColumnHandle creatorDatabase = createDbRefSubColumnHandle("creator", MongoSession.DATABASE_NAME, createUnboundedVarcharType());
+        TupleDomain<ColumnHandle> domain = TupleDomain.withColumnDomains(ImmutableMap.of(
+                creatorId, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("abc123")),
+                creatorCollection, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("mycoll")),
+                creatorDatabase, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("mydb"))));
+
+        Document query = MongoSession.buildQuery(domain);
+        // Field order in subdocument matches MongoDB-standard DBRef serialization order: $ref, $id, $db
+        assertThat(query).isEqualTo(new Document("creator",
+                new Document("$ref", "mycoll").append("$id", "abc123").append("$db", "mydb")));
+    }
+
+    @Test
+    public void testBuildQueryDbRefNullDatabaseOmitsDbKey()
+    {
+        // databaseName IS NULL with collectionName and id — subdocument without $db key, matches DBRefs stored without $db
+        MongoColumnHandle creatorId = createDbRefSubColumnHandle("creator", MongoSession.ID, createUnboundedVarcharType());
+        MongoColumnHandle creatorCollection = createDbRefSubColumnHandle("creator", MongoSession.COLLECTION_NAME, createUnboundedVarcharType());
+        MongoColumnHandle creatorDatabase = createDbRefSubColumnHandle("creator", MongoSession.DATABASE_NAME, createUnboundedVarcharType());
+        TupleDomain<ColumnHandle> domain = TupleDomain.withColumnDomains(ImmutableMap.of(
+                creatorId, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("abc123")),
+                creatorCollection, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("mycoll")),
+                creatorDatabase, Domain.onlyNull(createUnboundedVarcharType())));
+
+        Document query = MongoSession.buildQuery(domain);
+        // Field order matches standard DBRef order: $ref, $id (no $db since databaseName IS NULL)
+        assertThat(query).isEqualTo(new Document("creator",
+                new Document("$ref", "mycoll").append("$id", "abc123")));
+    }
+
+    @Test
+    public void testBuildQueryDbRefRangePredicateFallsBackToDotNotation()
+    {
+        // A range predicate on id prevents subdocument grouping — fall back to dot notation
+        MongoColumnHandle creatorId = createDbRefSubColumnHandle("creator", MongoSession.ID, createUnboundedVarcharType());
+        MongoColumnHandle creatorCollection = createDbRefSubColumnHandle("creator", MongoSession.COLLECTION_NAME, createUnboundedVarcharType());
+        TupleDomain<ColumnHandle> domain = TupleDomain.withColumnDomains(ImmutableMap.of(
+                creatorId, Domain.create(ValueSet.ofRanges(greaterThan(createUnboundedVarcharType(), utf8Slice("a"))), false),
+                creatorCollection, Domain.singleValue(createUnboundedVarcharType(), utf8Slice("mycoll"))));
+
+        Document query = MongoSession.buildQuery(domain);
+        // Range on id → falls back to two separate dot-notation predicates
+        assertThat(query.get("$and")).isNotNull();
+        List<?> andClauses = (List<?>) query.get("$and");
+        assertThat(andClauses).hasSize(2);
+    }
+
     private static MongoColumnHandle createColumnHandle(String baseName, Type type, String... dereferenceNames)
     {
         return new MongoColumnHandle(
@@ -246,6 +329,19 @@ public class TestMongoSession
                 ImmutableList.copyOf(dereferenceNames),
                 type,
                 false,
+                false,
+                false,
+                Optional.empty());
+    }
+
+    private static MongoColumnHandle createDbRefSubColumnHandle(String baseName, String subFieldName, Type type)
+    {
+        return new MongoColumnHandle(
+                baseName,
+                ImmutableList.of(subFieldName),
+                type,
+                false,
+                true,   // dbRefField = true
                 false,
                 Optional.empty());
     }

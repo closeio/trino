@@ -108,16 +108,17 @@ public class TestMongoTableHandle
         SchemaTableName schemaTableName = new SchemaTableName("schema", "table");
         RemoteTableName remoteTableName = new RemoteTableName("Schema", "Table");
         Set<MongoColumnHandle> projectedColumns = ImmutableSet.of(
-                new MongoColumnHandle("id", ImmutableList.of(), INTEGER, false, false, Optional.empty()),
-                new MongoColumnHandle("address", ImmutableList.of("street"), VARCHAR, false, false, Optional.empty()),
+                new MongoColumnHandle("id", ImmutableList.of(), INTEGER, false, false, false, Optional.empty()),
+                new MongoColumnHandle("address", ImmutableList.of("street"), VARCHAR, false, false, false, Optional.empty()),
                 new MongoColumnHandle(
                         "user",
                         ImmutableList.of(),
                         RowType.from(ImmutableList.of(new RowType.Field(Optional.of("first"), VARCHAR), new RowType.Field(Optional.of("last"), VARCHAR))),
                         false,
                         false,
+                        false,
                         Optional.empty()),
-                new MongoColumnHandle("creator", ImmutableList.of("databasename"), VARCHAR, false, true, Optional.empty()));
+                new MongoColumnHandle("creator", ImmutableList.of("databasename"), VARCHAR, false, true, false, Optional.empty()));
 
         MongoTableHandle expected = new MongoTableHandle(
                 schemaTableName,

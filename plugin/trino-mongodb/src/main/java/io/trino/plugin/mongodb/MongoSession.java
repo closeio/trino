@@ -80,6 +80,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -144,6 +145,7 @@ public class MongoSession
     private static final String FIELDS_NAME_KEY = "name";
     private static final String FIELDS_TYPE_KEY = "type";
     private static final String FIELDS_HIDDEN_KEY = "hidden";
+    private static final String FIELDS_DBREF_COLUMN_KEY = "dbRefColumn";
 
     private static final Document EMPTY_DOCUMENT = new Document();
 
@@ -484,7 +486,8 @@ public class MongoSession
 
         Type type = typeManager.fromSqlType(typeString);
 
-        return new MongoColumnHandle(name, ImmutableList.of(), type, hidden, false, Optional.ofNullable(comment));
+        boolean dbRefColumn = columnMeta.getBoolean(FIELDS_DBREF_COLUMN_KEY, false);
+        return new MongoColumnHandle(name, ImmutableList.of(), type, hidden, false, dbRefColumn, Optional.ofNullable(comment));
     }
 
     private List<Document> getColumnMetadata(Document doc)
@@ -557,7 +560,14 @@ public class MongoSession
         // Starting in MongoDB 4.4, it is illegal to project an embedded document with any of the embedded document's fields
         // (https://www.mongodb.com/docs/manual/reference/limits/#mongodb-limit-Projection-Restrictions). So, Project only sufficient columns.
         for (MongoColumnHandle column : projectSufficientColumns(columns)) {
-            if (column.dereferenceNames().stream().anyMatch(columnName -> TypeUtils.isImplicitRowField(columnName, implicitPrefix))) {
+            if (column.dbRefField()) {
+                // For DBRef sub-field columns, project the base column so that the MongoDB Java driver
+                // deserializes the full DBRef document. MongoPageSource extracts the sub-fields from the
+                // returned DBRef object. Projecting individual keys like "creator.$id" would produce a
+                // partial document that the driver cannot parse as a DBRef.
+                output.append(column.baseName(), 1);
+            }
+            else if (column.dereferenceNames().stream().anyMatch(columnName -> TypeUtils.isImplicitRowField(columnName, implicitPrefix))) {
                 // Add parent field for implicit column
                 output.append(column.baseName(), 1);
             }
@@ -614,10 +624,24 @@ public class MongoSession
     {
         ImmutableList.Builder<Document> queryBuilder = ImmutableList.builder();
         if (tupleDomain.getDomains().isPresent()) {
+            // Group DBRef sub-field predicates by base column name so they can be combined
+            // into a proper MongoDB subdocument predicate that uses full-document DBRef indexes.
+            Map<String, List<Map.Entry<MongoColumnHandle, Domain>>> dbRefGroups = new LinkedHashMap<>();
+
             for (Map.Entry<ColumnHandle, Domain> entry : tupleDomain.getDomains().get().entrySet()) {
                 MongoColumnHandle column = (MongoColumnHandle) entry.getKey();
-                Optional<Document> predicate = buildPredicate(column, entry.getValue());
-                predicate.ifPresent(queryBuilder::add);
+                if (column.dbRefField()) {
+                    dbRefGroups.computeIfAbsent(column.baseName(), k -> new ArrayList<>())
+                            .add(Map.entry(column, entry.getValue()));
+                }
+                else {
+                    buildPredicate(column, entry.getValue()).ifPresent(queryBuilder::add);
+                }
+            }
+
+            for (Map.Entry<String, List<Map.Entry<MongoColumnHandle, Domain>>> dbRefEntry : dbRefGroups.entrySet()) {
+                buildDbRefGroupPredicate(dbRefEntry.getKey(), dbRefEntry.getValue())
+                        .ifPresent(queryBuilder::add);
             }
         }
 
@@ -625,10 +649,124 @@ public class MongoSession
         return query.isEmpty() ? EMPTY_DOCUMENT : andPredicate(query);
     }
 
+    /**
+     * Build a MongoDB predicate for a group of DBRef sub-field predicates that share the same base column.
+     * <p>
+     * When all three DBRef sub-fields (id, collectionName, databaseName) have single-value equality
+     * constraints, they are combined into a MongoDB subdocument predicate
+     * (e.g., {@code {"creator": {"$ref": "mycoll", "$id": "123", "$db": "mydb"}}}) which can leverage
+     * full-document indexes on the DBRef field. If databaseName IS NULL, the {@code $db} key is omitted
+     * from the subdocument, matching DBRefs stored without a database.
+     * <p>
+     * For predicates on fewer than all three sub-fields, or when a range predicate is present,
+     * individual dot-notation predicates with correct MongoDB DBRef key names ({@code $id}, {@code $ref},
+     * {@code $db}) are generated instead (e.g., {@code {"creator.$id": "123"}}).
+     * Dot-notation predicates correctly match any DBRef with those field values regardless of whether
+     * the optional {@code $db} field is present in the stored document.
+     */
+    private static Optional<Document> buildDbRefGroupPredicate(
+            String baseName,
+            List<Map.Entry<MongoColumnHandle, Domain>> subFieldPredicates)
+    {
+        // Check if ALL predicates in the group are simple equality constraints (not ranges, not nulls, not IN)
+        boolean allEquality = subFieldPredicates.stream()
+                .allMatch(entry -> {
+                    Domain domain = entry.getValue();
+                    if (domain.getValues().isNone() && domain.isNullAllowed()) {
+                        // IS NULL — we handle this by omitting the field from the subdocument
+                        return true;
+                    }
+                    List<Range> ranges = domain.getValues().getRanges().getOrderedRanges();
+                    return !domain.isNullAllowed() && ranges.size() == 1 && ranges.get(0).isSingleValue();
+                });
+
+        // Only use subdocument form when all 3 DBRef sub-fields have equality predicates.
+        // Subdocument equality requires an exact match of all fields in the stored document.
+        // If only 1 or 2 sub-fields are specified, we fall back to dot-notation which correctly
+        // matches any DBRef with those values regardless of the presence of the optional $db field.
+        if (allEquality && subFieldPredicates.size() == 3) {
+            // Index predicates by Trino field name for lookup during ordered iteration
+            Map<String, Map.Entry<MongoColumnHandle, Domain>> byFieldName = new LinkedHashMap<>();
+            for (Map.Entry<MongoColumnHandle, Domain> entry : subFieldPredicates) {
+                byFieldName.put(entry.getKey().dereferenceNames().getLast(), entry);
+            }
+
+            // Build subdocument in MongoDB-standard DBRef field order: $ref, $id, $db.
+            // MongoDB exact subdocument equality is order-sensitive, and the Java driver serializes
+            // DBRef documents as {$ref, $id, $db}. The query subdocument must use the same order.
+            Document subdoc = new Document();
+            for (String trinoFieldName : ImmutableList.of(COLLECTION_NAME, ID, DATABASE_NAME)) {
+                Map.Entry<MongoColumnHandle, Domain> entry = byFieldName.get(trinoFieldName);
+                if (entry == null) {
+                    // Not all 3 fields present despite size == 3 — fall back to dot-notation
+                    return buildDbRefDotNotationPredicates(baseName, subFieldPredicates);
+                }
+                Domain domain = entry.getValue();
+                if (domain.getValues().isNone() && domain.isNullAllowed()) {
+                    // IS NULL: omit the field — its absence represents a missing $db in the stored document
+                    continue;
+                }
+                Range range = domain.getValues().getRanges().getOrderedRanges().get(0);
+                Optional<Object> translated = translateValue(range.getSingleValue(), entry.getKey().type());
+                if (translated.isEmpty()) {
+                    // Translation failed — fall back to dot-notation for all predicates in the group
+                    return buildDbRefDotNotationPredicates(baseName, subFieldPredicates);
+                }
+                subdoc.put(toMongoDbRefKey(trinoFieldName), translated.get());
+            }
+            if (subdoc.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(new Document(baseName, subdoc));
+        }
+
+        // Single predicate or range predicate — use dot-notation with correct MongoDB DBRef key names
+        return buildDbRefDotNotationPredicates(baseName, subFieldPredicates);
+    }
+
+    /**
+     * Build individual dot-notation predicates for DBRef sub-fields, using the correct MongoDB key names
+     * ($id, $ref, $db) instead of the Trino field names (id, collectionName, databaseName).
+     */
+    private static Optional<Document> buildDbRefDotNotationPredicates(
+            String baseName,
+            List<Map.Entry<MongoColumnHandle, Domain>> subFieldPredicates)
+    {
+        ImmutableList.Builder<Document> predicates = ImmutableList.builder();
+        for (Map.Entry<MongoColumnHandle, Domain> entry : subFieldPredicates) {
+            MongoColumnHandle column = entry.getKey();
+            String mongoKey = toMongoDbRefKey(column.dereferenceNames().getLast());
+            String qualifiedMongoName = baseName + "." + mongoKey;
+            buildPredicateForName(qualifiedMongoName, column.type(), entry.getValue())
+                    .ifPresent(predicates::add);
+        }
+        List<Document> docs = predicates.build();
+        if (docs.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(docs.size() == 1 ? docs.get(0) : andPredicate(docs));
+    }
+
+    /**
+     * Maps a Trino DBRef field name to the corresponding MongoDB DBRef document key.
+     */
+    private static String toMongoDbRefKey(String trinoFieldName)
+    {
+        return switch (trinoFieldName) {
+            case ID -> "$id";
+            case COLLECTION_NAME -> "$ref";
+            case DATABASE_NAME -> "$db";
+            default -> throw new IllegalArgumentException("Unknown DBRef field name: " + trinoFieldName);
+        };
+    }
+
     private static Optional<Document> buildPredicate(MongoColumnHandle column, Domain domain)
     {
-        String name = column.getQualifiedName();
-        Type type = column.type();
+        return buildPredicateForName(column.getQualifiedName(), column.type(), domain);
+    }
+
+    private static Optional<Document> buildPredicateForName(String name, Type type, Domain domain)
+    {
         if (domain.getValues().isNone() && domain.isNullAllowed()) {
             return Optional.of(documentOf(name, isNullPredicate()));
         }
@@ -863,7 +1001,7 @@ public class MongoSession
 
         ArrayList<Document> fields = new ArrayList<>();
         if (!columns.stream().anyMatch(c -> c.baseName().equals("_id"))) {
-            fields.add(new MongoColumnHandle("_id", ImmutableList.of(), OBJECT_ID, true, false, Optional.empty()).getDocument());
+            fields.add(new MongoColumnHandle("_id", ImmutableList.of(), OBJECT_ID, true, false, false, Optional.empty()).getDocument());
         }
 
         fields.addAll(columns.stream()
@@ -915,6 +1053,7 @@ public class MongoSession
                 metadata.append(FIELDS_TYPE_KEY, fieldType.get().toString());
                 metadata.append(FIELDS_HIDDEN_KEY,
                         key.equals("_id") && fieldType.get().equals(OBJECT_ID.getTypeSignature()));
+                metadata.append(FIELDS_DBREF_COLUMN_KEY, value instanceof DBRef);
 
                 builder.add(metadata);
             }

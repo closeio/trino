@@ -520,7 +520,7 @@ public class MongoMetadata
         try {
             // Create the temporary page sink ID table
             RemoteTableName pageSinkIdsTable = new RemoteTableName(temporaryTable.databaseName(), generateTemporaryTableName(session));
-            MongoColumnHandle pageSinkIdColumn = new MongoColumnHandle(pageSinkIdColumnName, ImmutableList.of(), TRINO_PAGE_SINK_ID_COLUMN_TYPE, false, false, Optional.empty());
+            MongoColumnHandle pageSinkIdColumn = new MongoColumnHandle(pageSinkIdColumnName, ImmutableList.of(), TRINO_PAGE_SINK_ID_COLUMN_TYPE, false, false, false, Optional.empty());
             mongoSession.createTable(pageSinkIdsTable, ImmutableList.of(pageSinkIdColumn), Optional.empty());
             closer.register(() -> mongoSession.dropTable(pageSinkIdsTable));
 
@@ -552,7 +552,7 @@ public class MongoMetadata
     @Override
     public ColumnHandle getMergeRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
-        return new MongoColumnHandle("$merge_row_id", ImmutableList.of(), BIGINT, true, false, Optional.empty());
+        return new MongoColumnHandle("$merge_row_id", ImmutableList.of(), BIGINT, true, false, false, Optional.empty());
     }
 
     @Override
@@ -688,7 +688,7 @@ public class MongoMetadata
         // Create projected column representations for supported sub expressions. Simple column references and chain of
         // dereferences on a variable are supported right now.
         Set<ConnectorExpression> projectedExpressions = projections.stream()
-                .flatMap(expression -> extractSupportedProjectedColumns(expression, MongoMetadata::isSupportedForPushdown).stream())
+                .flatMap(expression -> extractSupportedProjectedColumns(expression, expr -> isSupportedForPushdown(expr, assignments)).stream())
                 .collect(toImmutableSet());
 
         Map<ConnectorExpression, ProjectedColumnRepresentation> columnProjections = projectedExpressions.stream()
@@ -752,7 +752,7 @@ public class MongoMetadata
                 false));
     }
 
-    private static boolean isSupportedForPushdown(ConnectorExpression connectorExpression)
+    private static boolean isSupportedForPushdown(ConnectorExpression connectorExpression, Map<String, ColumnHandle> assignments)
     {
         if (connectorExpression instanceof Variable) {
             return true;
@@ -760,6 +760,15 @@ public class MongoMetadata
         if (connectorExpression instanceof FieldDereference fieldDereference) {
             RowType rowType = (RowType) fieldDereference.getTarget().getType();
             if (isDBRefField(rowType)) {
+                // Only allow pushdown for sub-fields of confirmed MongoDB DBRef columns.
+                // Plain documents with the same field structure must not be pushed down, as they use
+                // different MongoDB key names (databaseName/collectionName/id vs $db/$ref/$id).
+                if (fieldDereference.getTarget() instanceof Variable variable) {
+                    MongoColumnHandle handle = (MongoColumnHandle) assignments.get(variable.getName());
+                    if (handle != null && handle.dbRefColumn()) {
+                        return true;
+                    }
+                }
                 return false;
             }
             Field field = rowType.getFields().get(fieldDereference.getField());
@@ -800,6 +809,7 @@ public class MongoMetadata
                 projectedColumnType,
                 baseColumn.hidden(),
                 isDBRefField(parentType),
+                baseColumn.dbRefColumn(),
                 baseColumn.comment());
     }
 
@@ -873,7 +883,7 @@ public class MongoMetadata
     private static List<MongoColumnHandle> buildColumnHandles(ConnectorTableMetadata tableMetadata)
     {
         return tableMetadata.getColumns().stream()
-                .map(m -> new MongoColumnHandle(m.getName(), ImmutableList.of(), m.getType(), m.isHidden(), false, Optional.ofNullable(m.getComment())))
+                .map(m -> new MongoColumnHandle(m.getName(), ImmutableList.of(), m.getType(), m.isHidden(), false, false, Optional.ofNullable(m.getComment())))
                 .collect(toList());
     }
 
@@ -895,6 +905,6 @@ public class MongoMetadata
             columnName = baseColumnName + "_" + suffix;
             suffix++;
         }
-        return new MongoColumnHandle(columnName, ImmutableList.of(), TRINO_PAGE_SINK_ID_COLUMN_TYPE, false, false, Optional.empty());
+        return new MongoColumnHandle(columnName, ImmutableList.of(), TRINO_PAGE_SINK_ID_COLUMN_TYPE, false, false, false, Optional.empty());
     }
 }
